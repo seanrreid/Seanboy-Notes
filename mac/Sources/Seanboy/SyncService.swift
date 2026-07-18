@@ -21,7 +21,7 @@ final class SyncService: ObservableObject {
     /// Quiet period after the last edit before a sync fires.
     static let debounceSeconds: Double = 3
 
-    private let store: NoteStore
+    private var store: NoteStore
     private let stateFileURL: URL
     private var client: S3Client?
     private var debounceTask: Task<Void, Never>?
@@ -30,6 +30,11 @@ final class SyncService: ObservableObject {
         self.store = store
         self.stateFileURL = stateFileURL
         reloadConfig()
+    }
+
+    /// Repoints sync at a new store after a notes-folder change.
+    func attach(store: NoteStore) {
+        self.store = store
     }
 
     var isConfigured: Bool { client != nil }
@@ -97,10 +102,15 @@ final class SyncService: ObservableObject {
             // don't parse as notes stay note-less and are left untouched.
             let needed = Set(SyncPlanner.keysNeedingDownload(listing: listing, state: syncState))
             for index in listing.indices where needed.contains(listing[index].key) {
-                let (data, etag) = try await client.get(key: listing[index].key)
+                let key = listing[index].key
+                let (data, etag) = try await client.get(key: key)
                 listing[index].etag = etag
                 if let text = String(data: data, encoding: .utf8) {
-                    listing[index].note = NoteDocument.deserialize(text)
+                    // The key carries the note's tree location; objects
+                    // without an id (foreign files) stay note-less.
+                    listing[index].note = NoteDocument.note(
+                        from: text,
+                        relativePath: SyncPlanner.relativePath(forKey: key) ?? "")
                 }
             }
 
@@ -122,7 +132,7 @@ final class SyncService: ObservableObject {
             // edit into `.versions/` so a lost conflict is never lost data.
             for apply in plan.applyLocally {
                 if let displaced = apply.displacedLocal {
-                    let name = SyncPlanner.sanitizeTitle(displaced.title)
+                    let name = NoteNaming.sanitize(displaced.title)
                     try? await client.put(
                         key: versionKey(name: name),
                         data: Data(NoteDocument.serialize(displaced).utf8))

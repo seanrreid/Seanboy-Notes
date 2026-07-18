@@ -12,11 +12,18 @@ Where the original `tomboy.osx` wrapped the C#/Mono Tomboy engine in a native
 shell, Seanboy is a clean-room reimplementation: no Mono runtime, no XML note
 format — just a native app, plain Markdown files, and the same Tomboy soul.
 
-- **Local-first**: every note is a plain Markdown file (with a small frontmatter
-  header) in `~/Library/Application Support/Seanboy/Notes`. The app works fully
-  offline; sync is a layer on top.
-- **Tomboy soul**: instant search-as-you-type, `[[Wiki Links]]` between notes
-  (clicking a link to a missing note creates it), backlinks, lightweight editor.
+- **Your folder, your files**: notes are plain Markdown files with human
+  filenames (`Journal/2026/July.md`) in a folder you choose (default
+  `~/Documents/Seanboy Notes`), subfolders included. Point Seanboy at an
+  existing folder — Obsidian exports, anything — and it adopts the files in
+  place, preserving their frontmatter. Edit with any app; an FSEvents watcher
+  picks up external changes, renames, and deletions live. Deleting a note
+  moves it to the macOS Trash. The app works fully offline; sync is a layer
+  on top.
+- **Tomboy soul**: instant search-as-you-type across the whole tree (clear
+  the search to browse folders), `[[Wiki Links]]` between notes (clicking a
+  link to a missing note creates it; `[[folder/Title]]` pins a location),
+  backlinks, lightweight editor.
 - **Modern extras**: dark mode, Spotlight indexing, global quick-capture hotkey
   (⌃⌥⌘N), live Markdown styling.
 - **Sync**: on-demand file sync to a Cloudflare R2 bucket (any S3-compatible
@@ -73,9 +80,10 @@ provider needs one (R2 uses `auto`, the default).
 
 ### How sync works
 
-The bucket is just your notes as files: live notes at `notes/<Title>.md`
-(human-readable — the bucket makes sense without the app), deletions as
-tombstones under `.tombstones/`, and history under `.versions/`. Each device
+The bucket mirrors your notes folder 1:1: `Journal/2026/July.md` on disk is
+`notes/Journal/2026/July.md` in the bucket (human-readable — the bucket makes
+sense without the app), deletions are tombstones under `.tombstones/`, and
+history lives under `.versions/`. Each device
 keeps a small `syncstate.json` recording the ETag it last saw per note, which
 turns sync into a true three-way merge: local edits and remote edits are
 detected independently, uploads are ETag-conditional (`If-Match`), and
@@ -94,10 +102,11 @@ from your Macs or phone.
 
 ## Layout
 
-- `Sources/SeanboyCore` — UI-free engine: `Note`, Markdown+frontmatter storage
-  (`NoteStore`/`NoteDocument`), `WikiLinkParser`, `SearchService`, the pure
-  three-way `SyncPlanner` + `SyncState`, and a minimal `S3Client` with its
-  own SigV4 signer (no AWS SDK).
+- `Sources/SeanboyCore` — UI-free engine: `Note`, Obsidian-preserving
+  frontmatter storage (`NoteStore`/`NoteDocument`), the FSEvents
+  `FolderWatcher`, `TombstoneStore`, `WikiLinkParser`, `SearchService`, the
+  pure three-way `SyncPlanner` + `SyncState`, and a minimal `S3Client` with
+  its own SigV4 signer (no AWS SDK).
 - `Sources/Seanboy` — the SwiftUI app: sidebar/editor UI, live Markdown
   styling (`MarkdownEditor`), Spotlight indexer, Carbon global hotkey, quick
   capture panel, and the `SyncService` that executes sync plans against R2.

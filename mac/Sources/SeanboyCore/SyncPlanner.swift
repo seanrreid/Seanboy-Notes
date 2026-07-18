@@ -76,44 +76,18 @@ public enum SyncPlanner {
 
     // MARK: - Keys
 
-    /// Object key a note should live at: human-readable for live notes,
-    /// UUID under `.tombstones/` once deleted.
-    public static func sanitizeTitle(_ title: String) -> String {
-        var name = title
-            .components(separatedBy: .controlCharacters).joined(separator: " ")
-            .replacingOccurrences(of: "/", with: "-")
-            .trimmingCharacters(in: .whitespaces)
-        while name.hasPrefix(".") { name.removeFirst() }
-        if name.count > 120 { name = String(name.prefix(120)) }
-        return name.isEmpty ? "Untitled" : name
+    /// Object key a note lives at: its relative path under `notes/` (the
+    /// bucket mirrors the local tree 1:1), UUID under `.tombstones/` once
+    /// deleted. Paths are unique locally, so no collision handling needed.
+    public static func key(for note: Note) -> String {
+        note.isDeleted
+            ? tombstonesPrefix + note.id.uuidString + ".md"
+            : notesPrefix + note.relativePath
     }
 
-    /// Deterministic key per note. Title collisions keep the oldest note on
-    /// the clean name; later ones get a short ID suffix. Deterministic across
-    /// devices because it depends only on the (synced) note set.
-    public static func assignKeys(for notes: [Note]) -> [UUID: String] {
-        var keys: [UUID: String] = [:]
-        var claimed: [String: [Note]] = [:]
-
-        for note in notes {
-            if note.isDeleted {
-                keys[note.id] = tombstonesPrefix + note.id.uuidString + ".md"
-            } else {
-                claimed[sanitizeTitle(note.title), default: []].append(note)
-            }
-        }
-        for (name, claimants) in claimed {
-            let ordered = claimants.sorted {
-                $0.createdAt == $1.createdAt
-                    ? $0.id.uuidString < $1.id.uuidString
-                    : $0.createdAt < $1.createdAt
-            }
-            for (index, note) in ordered.enumerated() {
-                let suffix = index == 0 ? "" : " (\(note.id.uuidString.prefix(8)))"
-                keys[note.id] = notesPrefix + name + suffix + ".md"
-            }
-        }
-        return keys
+    /// The relative path a `notes/`-prefixed key maps to locally.
+    public static func relativePath(forKey key: String) -> String? {
+        key.hasPrefix(notesPrefix) ? String(key.dropFirst(notesPrefix.count)) : nil
     }
 
     // MARK: - Planning
@@ -132,7 +106,6 @@ public enum SyncPlanner {
     /// `keysNeedingDownload`.
     public static func plan(local: [Note], remote: [RemoteFile], state: SyncState) -> Plan {
         var plan = Plan()
-        let targetKeys = assignKeys(for: local)
         let etagByKey = Dictionary(remote.map { ($0.key, $0.etag) },
                                    uniquingKeysWith: { first, _ in first })
 
@@ -157,7 +130,7 @@ public enum SyncPlanner {
 
         for note in local {
             let entry = state[note.id]
-            let target = targetKeys[note.id] ?? tombstonesPrefix + note.id.uuidString + ".md"
+            let target = key(for: note)
             let localChanged = entry.map {
                 note.modifiedAt.timeIntervalSince($0.modifiedAt) > timestampTolerance
             } ?? true
@@ -225,8 +198,9 @@ public enum SyncPlanner {
     /// Content-equal within timestamp tolerance — used to recognize
     /// already-in-sync notes after a state-file loss.
     static func notesEquivalent(_ a: Note, _ b: Note) -> Bool {
-        a.id == b.id && a.title == b.title && a.body == b.body
+        a.id == b.id && a.relativePath == b.relativePath && a.body == b.body
             && a.isDeleted == b.isDeleted
+            && a.extraFrontmatter == b.extraFrontmatter
             && abs(a.modifiedAt.timeIntervalSince(b.modifiedAt)) <= timestampTolerance
     }
 }
