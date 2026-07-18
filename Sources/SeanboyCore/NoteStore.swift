@@ -91,7 +91,7 @@ public final class NoteStore {
             notesByID[note.id] = note
             onChange?()
         } catch {
-            NSLog("TomboyMac: failed to write note \(note.id): \(error)")
+            NSLog("Seanboy: failed to write note \(note.id): \(error)")
         }
     }
 

@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import TomboyCore
+import SeanboyCore
 
 @MainActor
 final class NotesViewModel: ObservableObject {
@@ -14,6 +14,7 @@ final class NotesViewModel: ObservableObject {
     @Published private(set) var revision = 0  // bumped on any store change
 
     init() {
+        NotesViewModel.migrateLegacySupportDirectoryIfNeeded()
         let directory = NotesViewModel.defaultNotesDirectory()
         do {
             store = try NoteStore(directory: directory)
@@ -36,8 +37,31 @@ final class NotesViewModel: ObservableObject {
     }
 
     static func defaultNotesDirectory() -> URL {
+        supportDirectory().appendingPathComponent("Notes", isDirectory: true)
+    }
+
+    /// Base Application Support directory for the app (`.../Seanboy`).
+    static func supportDirectory() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("TomboyMac/Notes", isDirectory: true)
+            .appendingPathComponent("Seanboy", isDirectory: true)
+    }
+
+    /// One-time rename of the pre-rebrand `TomboyMac` support directory to
+    /// `Seanboy`, so existing notes and Supabase credentials carry over. Runs
+    /// only when the new directory doesn't exist yet and the legacy one does.
+    static func migrateLegacySupportDirectoryIfNeeded() {
+        let fm = FileManager.default
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let legacy = appSupport.appendingPathComponent("TomboyMac", isDirectory: true)
+        let current = appSupport.appendingPathComponent("Seanboy", isDirectory: true)
+        guard fm.fileExists(atPath: legacy.path),
+              !fm.fileExists(atPath: current.path) else { return }
+        do {
+            try fm.moveItem(at: legacy, to: current)
+            NSLog("Seanboy: migrated legacy support directory TomboyMac → Seanboy")
+        } catch {
+            NSLog("Seanboy: failed to migrate legacy support directory: \(error)")
+        }
     }
 
     // MARK: - Derived state
@@ -110,11 +134,11 @@ final class NotesViewModel: ObservableObject {
         store.create(
             title: "Start Here",
             body: """
-            # Welcome to Tomboy Mac
+            # Welcome to Seanboy
 
             A small, fast, local-first notes app in the spirit of **Tomboy**.
 
-            - Your notes are plain Markdown files in `~/Library/Application Support/TomboyMac/Notes`
+            - Your notes are plain Markdown files in `~/Library/Application Support/Seanboy/Notes`
             - Search as you type in the sidebar
             - Link between notes with double brackets, like this: [[Ideas]]
             - Clicking a link to a note that doesn't exist *creates it*

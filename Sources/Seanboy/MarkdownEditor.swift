@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import TomboyCore
+import SeanboyCore
 
 /// Plain-Markdown editor with live styling: headings, bold, italic,
 /// ==highlight==, bullets, inline code, and clickable [[wiki links]].
@@ -54,7 +54,7 @@ struct MarkdownEditor: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
-            guard let url = link as? URL, url.scheme == "tomboymac" else { return false }
+            guard let url = link as? URL, url.scheme == "seanboy" else { return false }
             if let title = url.host(percentEncoded: false) {
                 parent.onOpenWikiLink(title)
             }
@@ -194,7 +194,7 @@ enum MarkdownStyler {
                 .trimmingCharacters(in: .whitespaces)
             guard !title.isEmpty,
                   let encoded = title.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
-                  let url = URL(string: "tomboymac://\(encoded)") else { return }
+                  let url = URL(string: "seanboy://\(encoded)") else { return }
             storage.addAttribute(.link, value: url, range: match.range)
             storage.addAttribute(.foregroundColor, value: NSColor.controlAccentColor,
                                  range: match.range)

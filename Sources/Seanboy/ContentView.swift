@@ -1,6 +1,6 @@
 import SwiftUI
 import CoreSpotlight
-import TomboyCore
+import SeanboyCore
 
 struct ContentView: View {
     @EnvironmentObject private var model: NotesViewModel

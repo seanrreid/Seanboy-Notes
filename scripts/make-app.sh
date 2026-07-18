@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Builds a runnable "Tomboy Mac.app" bundle from the SwiftPM release build.
-# Usage: scripts/make-app.sh   → dist/Tomboy Mac.app (ad-hoc signed)
+# Builds a runnable "Seanboy.app" bundle from the SwiftPM release build.
+# Usage: scripts/make-app.sh   → dist/Seanboy.app (ad-hoc signed)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-APP_NAME="Tomboy Mac"
-BUNDLE_ID="com.torchcodelab.tomboymac"
+APP_NAME="Seanboy"
+BUNDLE_ID="com.torchcodelab.seanboy"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
 
@@ -15,14 +15,14 @@ swift build -c release
 echo "▸ Assembling ${APP}..."
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp ".build/release/TomboyMac" "$APP/Contents/MacOS/TomboyMac"
+cp ".build/release/Seanboy" "$APP/Contents/MacOS/Seanboy"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key>          <string>TomboyMac</string>
+    <key>CFBundleExecutable</key>          <string>Seanboy</string>
     <key>CFBundleIdentifier</key>          <string>$BUNDLE_ID</string>
     <key>CFBundleName</key>                <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>         <string>$APP_NAME</string>

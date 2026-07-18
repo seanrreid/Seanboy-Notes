@@ -1,9 +1,9 @@
 import Foundation
 import Supabase
-import TomboyCore
+import SeanboyCore
 
 /// Syncs the local NoteStore with the Supabase `notes` table using the pure
-/// last-writer-wins planner in TomboyCore. Auth is email OTP: Supabase sends
+/// last-writer-wins planner in SeanboyCore. Auth is email OTP: Supabase sends
 /// a 6-digit code, the user types it into Settings.
 @MainActor
 final class SyncService: ObservableObject {
@@ -151,12 +151,12 @@ final class SyncService: ObservableObject {
             state = .success(Date())
         } catch {
             state = .error(error.localizedDescription)
-            NSLog("TomboyMac: sync failed: \(error)")
+            NSLog("Seanboy: sync failed: \(error)")
         }
     }
 
     private func notConfiguredError() -> Error {
-        NSError(domain: "TomboyMac", code: 2, userInfo: [
+        NSError(domain: "Seanboy", code: 2, userInfo: [
             NSLocalizedDescriptionKey:
                 "Add your Supabase URL and anon key in Settings → Sync first.",
         ])

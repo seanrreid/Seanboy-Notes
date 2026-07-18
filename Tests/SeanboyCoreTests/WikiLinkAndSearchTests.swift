@@ -1,5 +1,5 @@
 import XCTest
-@testable import TomboyCore
+@testable import SeanboyCore
 
 final class WikiLinkParserTests: XCTestCase {
     func testFindsLinks() {

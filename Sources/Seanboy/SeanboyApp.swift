@@ -1,13 +1,13 @@
 import SwiftUI
-import TomboyCore
+import SeanboyCore
 
 @main
-struct TomboyMacApp: App {
+struct SeanboyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = NotesViewModel.shared
 
     var body: some Scene {
-        WindowGroup("Tomboy Mac") {
+        WindowGroup("Seanboy") {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 700, minHeight: 420)

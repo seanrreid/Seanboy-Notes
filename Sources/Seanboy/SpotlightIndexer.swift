@@ -1,11 +1,11 @@
 import CoreSpotlight
 import Foundation
-import TomboyCore
+import SeanboyCore
 
 /// Mirrors live notes into the CoreSpotlight index so system-wide Spotlight
 /// search finds them; activating a result opens the note in-app.
 enum SpotlightIndexer {
-    private static let domain = "com.torchcodelab.tomboymac.notes"
+    private static let domain = "com.torchcodelab.seanboy.notes"
 
     nonisolated(unsafe) private static var pending: DispatchWorkItem?
 
@@ -32,7 +32,7 @@ enum SpotlightIndexer {
         index.deleteSearchableItems(withDomainIdentifiers: [domain]) { _ in
             index.indexSearchableItems(items) { error in
                 if let error {
-                    NSLog("TomboyMac: Spotlight indexing failed: \(error)")
+                    NSLog("Seanboy: Spotlight indexing failed: \(error)")
                 }
             }
         }

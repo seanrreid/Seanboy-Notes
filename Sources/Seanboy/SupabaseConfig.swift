@@ -3,7 +3,7 @@ import Foundation
 /// Supabase credentials, loaded from a JSON file next to the notes folder —
 /// never hardcoded and never committed to the repo:
 ///
-///     ~/Library/Application Support/TomboyMac/supabase.json
+///     ~/Library/Application Support/Seanboy/supabase.json
 ///     { "url": "https://xyzcompany.supabase.co", "anonKey": "eyJ..." }
 struct SupabaseConfig: Codable, Equatable {
     var url: URL
@@ -11,7 +11,7 @@ struct SupabaseConfig: Codable, Equatable {
 
     static var fileURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("TomboyMac/supabase.json")
+            .appendingPathComponent("Seanboy/supabase.json")
     }
 
     static func load() -> SupabaseConfig? {
@@ -22,7 +22,7 @@ struct SupabaseConfig: Codable, Equatable {
     static func save(urlString: String, anonKey: String) throws -> SupabaseConfig {
         guard let url = URL(string: urlString.trimmingCharacters(in: .whitespaces)),
               url.scheme?.hasPrefix("http") == true else {
-            throw NSError(domain: "TomboyMac", code: 1, userInfo: [
+            throw NSError(domain: "Seanboy", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Project URL must look like https://xyz.supabase.co",
             ])
         }

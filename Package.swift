@@ -2,29 +2,29 @@
 import PackageDescription
 
 let package = Package(
-    name: "TomboyMac",
+    name: "Seanboy",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "TomboyCore", targets: ["TomboyCore"]),
-        .executable(name: "TomboyMac", targets: ["TomboyMac"]),
+        .library(name: "SeanboyCore", targets: ["SeanboyCore"]),
+        .executable(name: "Seanboy", targets: ["Seanboy"]),
     ],
     dependencies: [
         .package(url: "https://github.com/supabase/supabase-swift.git", from: "2.0.0"),
     ],
     targets: [
         .target(
-            name: "TomboyCore",
+            name: "SeanboyCore",
             dependencies: [
                 .product(name: "Supabase", package: "supabase-swift"),
             ]
         ),
         .executableTarget(
-            name: "TomboyMac",
-            dependencies: ["TomboyCore"]
+            name: "Seanboy",
+            dependencies: ["SeanboyCore"]
         ),
         .testTarget(
-            name: "TomboyCoreTests",
-            dependencies: ["TomboyCore"]
+            name: "SeanboyCoreTests",
+            dependencies: ["SeanboyCore"]
         ),
     ]
 )

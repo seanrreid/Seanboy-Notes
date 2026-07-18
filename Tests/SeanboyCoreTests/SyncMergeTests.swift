@@ -1,5 +1,5 @@
 import XCTest
-@testable import TomboyCore
+@testable import SeanboyCore
 
 final class SyncMergeTests: XCTestCase {
     private func note(_ title: String, modified: TimeInterval, deleted: Bool = false) -> Note {
