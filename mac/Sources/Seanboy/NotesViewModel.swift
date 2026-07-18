@@ -21,7 +21,10 @@ final class NotesViewModel: ObservableObject {
         } catch {
             fatalError("Cannot create notes directory at \(directory.path): \(error)")
         }
-        sync = SyncService(store: store)
+        sync = SyncService(
+            store: store,
+            stateFileURL: NotesViewModel.supportDirectory()
+                .appendingPathComponent("syncstate.json"))
         store.onChange = { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -33,7 +36,7 @@ final class NotesViewModel: ObservableObject {
             seedWelcomeNotes()
         }
         selectedNoteID = filteredNotes.first?.id
-        sync.startAutoSync()
+        sync.syncNow()  // on-demand model: sync at launch, after edits, and on ⇧⌘S
     }
 
     static func defaultNotesDirectory() -> URL {
@@ -47,7 +50,7 @@ final class NotesViewModel: ObservableObject {
     }
 
     /// One-time rename of the pre-rebrand `TomboyMac` support directory to
-    /// `Seanboy`, so existing notes and Supabase credentials carry over. Runs
+    /// `Seanboy`, so existing notes carry over. Runs
     /// only when the new directory doesn't exist yet and the legacy one does.
     static func migrateLegacySupportDirectoryIfNeeded() {
         let fm = FileManager.default
@@ -85,6 +88,7 @@ final class NotesViewModel: ObservableObject {
         let note = store.create(title: title, body: body)
         searchText = ""
         selectedNoteID = note.id
+        sync.noteDidChange()
         return note
     }
 
@@ -92,6 +96,7 @@ final class NotesViewModel: ObservableObject {
         guard var note = store.note(id: id), note.body != body else { return }
         note.body = body
         store.update(note)
+        sync.noteDidChange()
     }
 
     func updateTitle(_ title: String, for id: UUID) {
@@ -99,11 +104,13 @@ final class NotesViewModel: ObservableObject {
         guard var note = store.note(id: id), !trimmed.isEmpty, note.title != trimmed else { return }
         note.title = trimmed
         store.update(note)
+        sync.noteDidChange()
     }
 
     func deleteNote(id: UUID) {
         store.delete(id: id)
         SpotlightIndexer.remove(id: id)
+        sync.noteDidChange()
         if selectedNoteID == id {
             selectedNoteID = filteredNotes.first?.id
         }
@@ -145,7 +152,7 @@ final class NotesViewModel: ObservableObject {
             - Press ⌃⌥⌘N anywhere in macOS for quick capture
             - ==Highlight== things, make them **bold** or *italic*
 
-            Open *Settings → Sync* to connect Supabase and sync your Macs.
+            Open *Settings → Sync* to connect an R2 bucket and sync your machines.
             """)
     }
 }

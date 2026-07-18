@@ -16,6 +16,7 @@ echo "▸ Assembling ${APP}..."
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/release/Seanboy" "$APP/Contents/MacOS/Seanboy"
+cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -25,6 +26,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>          <string>Seanboy</string>
     <key>CFBundleIdentifier</key>          <string>$BUNDLE_ID</string>
     <key>CFBundleName</key>                <string>$APP_NAME</string>
+    <key>CFBundleIconFile</key>            <string>AppIcon</string>
     <key>CFBundleDisplayName</key>         <string>$APP_NAME</string>
     <key>CFBundlePackageType</key>         <string>APPL</string>
     <key>CFBundleShortVersionString</key>  <string>1.0.0</string>
