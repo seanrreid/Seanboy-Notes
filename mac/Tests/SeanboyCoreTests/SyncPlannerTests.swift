@@ -21,27 +21,18 @@ final class SyncPlannerTests: XCTestCase {
 
     // MARK: - Keys
 
-    func testAssignKeysHumanReadable() {
-        let note = makeNote("Grocery List")
-        let keys = SyncPlanner.assignKeys(for: [note])
-        XCTAssertEqual(keys[note.id], "notes/Grocery List.md")
+    func testKeyMirrorsRelativePath() {
+        let note = Note(relativePath: "Journal/2026/July.md")
+        XCTAssertEqual(SyncPlanner.key(for: note), "notes/Journal/2026/July.md")
+        XCTAssertEqual(SyncPlanner.relativePath(forKey: "notes/Journal/2026/July.md"),
+                       "Journal/2026/July.md")
+        XCTAssertNil(SyncPlanner.relativePath(forKey: ".tombstones/x.md"))
     }
 
-    func testAssignKeysTitleCollision() {
-        let older = makeNote("Ideas", created: 0)
-        let newer = makeNote("Ideas", created: 100)
-        let keys = SyncPlanner.assignKeys(for: [newer, older])
-        XCTAssertEqual(keys[older.id], "notes/Ideas.md")
-        XCTAssertEqual(keys[newer.id],
-                       "notes/Ideas (\(newer.id.uuidString.prefix(8))).md")
-    }
-
-    func testAssignKeysTombstoneAndSanitization() {
+    func testKeyForTombstoneUsesID() {
         let deleted = makeNote("Gone", deleted: true)
-        let slashed = makeNote("a/b: plan")
-        let keys = SyncPlanner.assignKeys(for: [deleted, slashed])
-        XCTAssertEqual(keys[deleted.id], ".tombstones/\(deleted.id.uuidString).md")
-        XCTAssertEqual(keys[slashed.id], "notes/a-b: plan.md")
+        XCTAssertEqual(SyncPlanner.key(for: deleted),
+                       ".tombstones/\(deleted.id.uuidString).md")
     }
 
     // MARK: - Download selection

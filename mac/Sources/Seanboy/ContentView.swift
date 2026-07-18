@@ -44,14 +44,32 @@ struct ContentView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             List(selection: $model.selectedNoteID) {
-                ForEach(model.filteredNotes) { note in
-                    NoteRow(note: note)
-                        .tag(note.id)
-                        .contextMenu {
-                            Button("Delete Note", role: .destructive) {
-                                model.deleteNote(id: note.id)
-                            }
+                if model.searchText.isEmpty {
+                    // Browse: the real folder structure.
+                    OutlineGroup(model.folderTree, children: \.children) { node in
+                        if let noteID = node.noteID, let note = model.store.note(id: noteID) {
+                            NoteRow(note: note)
+                                .tag(noteID)
+                                .contextMenu {
+                                    Button("Delete Note", role: .destructive) {
+                                        model.deleteNote(id: noteID)
+                                    }
+                                }
+                        } else {
+                            Label(node.name, systemImage: "folder")
                         }
+                    }
+                } else {
+                    // Search: flat, ranked results across the whole tree.
+                    ForEach(model.filteredNotes) { note in
+                        NoteRow(note: note)
+                            .tag(note.id)
+                            .contextMenu {
+                                Button("Delete Note", role: .destructive) {
+                                    model.deleteNote(id: note.id)
+                                }
+                            }
+                    }
                 }
             }
             .listStyle(.sidebar)

@@ -18,6 +18,19 @@ struct SyncSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Notes Folder") {
+                LabeledContent("Location", value: model.store.directory.path)
+                HStack {
+                    Button("Choose Folder…") { chooseFolder() }
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([model.store.directory])
+                    }
+                }
+                Text("Your notes are plain Markdown files in this folder (subfolders included). Point Seanboy at any folder — existing Markdown is adopted in place, and external edits are picked up automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("R2 Bucket") {
                 TextField("Endpoint", text: $endpoint,
                           prompt: Text("https://<account>.r2.cloudflarestorage.com"))
@@ -59,6 +72,19 @@ struct SyncSettingsView: View {
                 accessKeyID = config.accessKeyID
                 secretAccessKey = config.secretAccessKey
             }
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = model.store.directory
+        panel.prompt = "Use This Folder"
+        panel.message = "Choose the folder where your Markdown notes live."
+        if panel.runModal() == .OK, let url = panel.url {
+            model.setNotesFolder(url)
         }
     }
 
