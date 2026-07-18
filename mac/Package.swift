@@ -8,16 +8,8 @@ let package = Package(
         .library(name: "SeanboyCore", targets: ["SeanboyCore"]),
         .executable(name: "Seanboy", targets: ["Seanboy"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/supabase/supabase-swift.git", from: "2.0.0"),
-    ],
     targets: [
-        .target(
-            name: "SeanboyCore",
-            dependencies: [
-                .product(name: "Supabase", package: "supabase-swift"),
-            ]
-        ),
+        .target(name: "SeanboyCore"),
         .executableTarget(
             name: "Seanboy",
             dependencies: ["SeanboyCore"]
