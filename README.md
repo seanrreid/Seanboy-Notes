@@ -1,4 +1,4 @@
-# Seanboy Notes
+# Seanboy Notes[^1]
 
 A modern reimagining of [Tomboy Notes](https://github.com/tomboy-notes) —
 local-first Markdown notes with `[[Wiki Links]]`, instant search, and optional
@@ -34,3 +34,7 @@ All platform builds share the same data model so notes sync cleanly between them
 ## License
 
 LGPL, in the spirit of the original Tomboy.
+
+[^1]: I'm Sean, Hi! 👋 This is my vibe coded fork of *Tomboy*, hence "Seanboy."
+    BUT "Seanboy" is also what my Grandma Aggie called me my whole life. So, this is
+    my way of carrying that on in my own geeky way.
