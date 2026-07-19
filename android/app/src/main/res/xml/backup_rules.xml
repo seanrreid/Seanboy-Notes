@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cloud/local backup rules. Notes and sync state live in the app-private files
+  directory; credentials are excluded (they live in encrypted storage and should
+  not be backed up in the clear). Tighten in the credentials milestone.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="credentials.xml" />
+</full-backup-content>
