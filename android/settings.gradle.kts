@@ -22,4 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Seanboy"
 include(":app")
-// :core (the pure-Kotlin engine port) lands in Milestone 1 — see docs/PRD-android-v1.md
+include(":core") // pure-Kotlin engine port — see docs/PRD-android-v1.md
