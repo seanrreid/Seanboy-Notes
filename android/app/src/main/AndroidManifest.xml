@@ -3,9 +3,9 @@
 
     <!--
       No storage permissions: notes live in the app-private files directory.
-      No INTERNET permission yet — added in Milestone 3 when the S3/R2 sync
-      client lands. See docs/PRD-android-v1.md.
+      INTERNET is the only permission — on-demand R2 sync over HTTPS.
     -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"

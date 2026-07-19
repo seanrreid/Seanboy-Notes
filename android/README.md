@@ -9,9 +9,15 @@ notes with `[[Wiki Links]]`, instant search, and on-demand sync to your own R2
 bucket — the same data model and bucket format as the macOS app, so notes
 round-trip cleanly between every device.
 
-**Status: Milestone 0 (project skeleton).** The app currently builds to an
-installable debug APK showing a placeholder screen. The local store, sync
-engine, search, and editor land in the milestones that follow (see the PRD).
+**Status: engine complete + functional UI.** The `:core` engine — note
+document format, local `NoteStore`, tombstones, `[[wiki links]]`, search, SigV4
+signing, the three-way `SyncPlanner`, the S3 client, and the `SyncEngine`
+orchestrator — is fully ported from the Mac and covered by **67 passing JVM
+tests** (`./gradlew :core:test`). The app module wires it into a Compose UI
+(searchable notes list, editor with backlinks and wiki-link navigation,
+encrypted sync settings) and builds to an installable debug APK
+(`./gradlew :app:assembleDebug`). See [`docs/PRD-android-v1.md`](../docs/PRD-android-v1.md)
+for the full milestone plan.
 
 ## Requirements
 
@@ -60,13 +66,25 @@ Run the unit tests (once there are any beyond the skeleton):
 ## Layout
 
 - `app/` — the Compose application module: `MainActivity` (single-Activity
-  host), the Material3 theme, and (in later milestones) the UI for the sidebar
-  tree, search, editor, backlinks, and settings.
-- `:core` (Milestone 1) — a pure-Kotlin, Android-free engine module: the
-  `NoteDocument`/`NoteStore` port, `WikiLinkParser`, `SearchService`, the SigV4
-  `S3Client`, and the three-way `SyncPlanner` + `SyncState`. JVM-unit-testable,
-  mirroring `mac/Sources/SeanboyCore`.
-- `gradle/libs.versions.toml` — the version catalog (AGP, Kotlin, Compose BOM).
+  host), the Material3 theme, `NotesViewModel`, the `SeanboyApp` UI (list +
+  search, editor with backlinks, sync settings), and `CredentialStore`
+  (EncryptedSharedPreferences).
+- `core/` — a pure-Kotlin, Android-free engine module mirroring
+  `mac/Sources/SeanboyCore`: `NoteDocument`/`Note`, `NoteStore`,
+  `TombstoneStore`, `WikiLinkParser`, `SearchService`, `SigV4`, `S3Client`,
+  the three-way `SyncPlanner` + `SyncState`, and the `SyncEngine` orchestrator.
+  JVM-unit-tested (67 tests, incl. AWS SigV4 vectors and MockWebServer sync
+  round-trips).
+- `gradle/libs.versions.toml` — the version catalog (AGP, Kotlin, Compose BOM,
+  OkHttp, kotlinx.serialization).
+
+## What's not done yet
+
+The Mac's richer touches are follow-ups: a collapsible folder **tree** in the
+sidebar (the list is flat + search for now), live Markdown **styling** in the
+editor (plain text field today), inline tap-to-follow wiki links (shown as a
+Links/Backlinks button row instead), debounced-after-edit sync tuning, and a
+QR credential handoff. None change the data model or bucket format.
 
 ## License
 

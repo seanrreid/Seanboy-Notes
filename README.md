@@ -10,7 +10,7 @@ platform.
 | Directory | Platform | Status |
 |---|---|---|
 | [`mac/`](mac/) | macOS 14+ (Swift + SwiftUI) | ✅ v1 |
-| [`android/`](android/) | Android (Kotlin + Jetpack Compose) | 📝 [PRD](docs/PRD-android-v1.md) |
+| [`android/`](android/) | Android (Kotlin + Jetpack Compose) | 🚧 v1 in progress — engine + UI, sideload APK ([PRD](docs/PRD-android-v1.md)) |
 
 Each platform directory is self-contained with its own build system and README.
 See [`mac/README.md`](mac/README.md) for the macOS app's build instructions,
