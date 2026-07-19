@@ -17,7 +17,10 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.okhttp)
+
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver)
 }
 
 tasks.withType<Test> {
