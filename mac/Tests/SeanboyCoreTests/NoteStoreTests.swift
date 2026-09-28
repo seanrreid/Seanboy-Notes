@@ -228,6 +228,55 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertNil(store.note(atPath: "Draft.md"))
     }
 
+    func testRenameMovesFile() throws {
+        let store = try makeStore()
+        let note = store.create(title: "Untitled", body: "text")
+        guard case .renamed(let renamed) = store.rename(id: note.id, to: "  Groceries ") else {
+            return XCTFail("expected rename")
+        }
+        XCTAssertEqual(renamed.title, "Groceries")
+        XCTAssertEqual(store.note(id: note.id)?.body, "text")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("Groceries.md").path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("Untitled.md").path))
+    }
+
+    func testRenameBlankOrSameIsUnchanged() throws {
+        let store = try makeStore()
+        let note = store.create(title: "Keep")
+        XCTAssertEqual(store.rename(id: note.id, to: "   "), .unchanged)
+        XCTAssertEqual(store.rename(id: note.id, to: "Keep"), .unchanged)
+        XCTAssertEqual(store.note(id: note.id)?.title, "Keep")
+    }
+
+    func testRenameOntoExistingNoteClashesAndLeavesBothIntact() throws {
+        let store = try makeStore()
+        let existing = store.create(title: "Ideas", body: "original")
+        let note = store.create(title: "Untitled", body: "new")
+        XCTAssertEqual(store.rename(id: note.id, to: "ideas"), .clash(existingTitle: "Ideas"))
+        XCTAssertEqual(store.note(id: note.id)?.title, "Untitled")
+        XCTAssertEqual(store.note(id: existing.id)?.body, "original")
+        let reloaded = try makeStore()
+        XCTAssertEqual(reloaded.note(id: existing.id)?.body, "original")
+        XCTAssertEqual(reloaded.note(id: note.id)?.body, "new")
+    }
+
+    func testRenameClashIsPerFolder() throws {
+        let store = try makeStore()
+        store.create(title: "Ideas", folder: "Projects")
+        let note = store.create(title: "Untitled")
+        guard case .renamed = store.rename(id: note.id, to: "Ideas") else {
+            return XCTFail("same name in another folder is allowed")
+        }
+    }
+
+    func testBlankCreateIsUntitled() throws {
+        let store = try makeStore()
+        XCTAssertEqual(store.create(title: "").title, "Untitled")
+        XCTAssertEqual(store.create(title: " ").title, "Untitled 2")
+    }
+
     func testCaseOnlyRename() throws {
         let store = try makeStore()
         var note = store.create(title: "readme")

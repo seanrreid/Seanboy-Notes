@@ -9,9 +9,20 @@ enum AppSettings {
         var notesFolderPath: String?
     }
 
+    /// Set to a scratch directory to run the app fully isolated from the real
+    /// settings, notes folder, and sync credentials (development only).
+    static let supportOverride = ProcessInfo.processInfo.environment["SEANBOY_SUPPORT_DIR"]
+        .map { URL(fileURLWithPath: $0, isDirectory: true) }
+
+    /// `~/Library/Application Support/Seanboy` (or `$SEANBOY_SUPPORT_DIR`).
+    static var supportDirectory: URL {
+        supportOverride ?? FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Seanboy", isDirectory: true)
+    }
+
     static var fileURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Seanboy/settings.json")
+        supportDirectory.appendingPathComponent("settings.json")
     }
 
     static func load() -> Contents {
@@ -47,9 +58,10 @@ enum AppSettings {
         if let path = load().notesFolderPath {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
-        let legacy = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Seanboy/Notes", isDirectory: true)
+        if let supportOverride {
+            return supportOverride.appendingPathComponent("Seanboy Notes", isDirectory: true)
+        }
+        let legacy = supportDirectory.appendingPathComponent("Notes", isDirectory: true)
         let legacyHasNotes = ((try? FileManager.default.contentsOfDirectory(
             at: legacy, includingPropertiesForKeys: nil)) ?? [])
             .contains { $0.pathExtension == "md" }

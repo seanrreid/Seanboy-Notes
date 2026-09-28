@@ -5,8 +5,18 @@ import SeanboyCore
 /// Plain-Markdown editor with live styling: headings, bold, italic,
 /// ==highlight==, bullets, inline code, and clickable [[wiki links]].
 /// Shortcuts: ⌘B bold, ⌘I italic, ⇧⌘H highlight, ⇧⌘K wiki link.
+///
+/// The note's title sits at the top of the same scroll view as an
+/// Obsidian-style inline title (`InlineTitleHeader`). It edits the filename,
+/// never the body text.
 struct MarkdownEditor: NSViewRepresentable {
     @Binding var text: String
+    var title: String
+    var titleWarning: String?
+    /// Put the cursor in the title when the note opens (fresh ⌘N notes).
+    var focusTitle: Bool
+    var onTitleEdit: (String) -> Void
+    var onTitleCommit: () -> Void
     var onOpenWikiLink: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -24,12 +34,33 @@ struct MarkdownEditor: NSViewRepresentable {
         context.coordinator.textView = textView
         textView.string = text
         context.coordinator.applyStyling()
+
+        let header = InlineTitleHeader()
+        header.field.stringValue = title
+        header.setWarning(titleWarning)
+        header.wantsInitialFocus = focusTitle
+        header.onEdit = { [weak coordinator = context.coordinator] in coordinator?.parent.onTitleEdit($0) }
+        header.onCommit = { [weak coordinator = context.coordinator] in coordinator?.parent.onTitleCommit() }
+        header.onExit = { [weak textView] in
+            guard let textView else { return }
+            textView.window?.makeFirstResponder(textView)
+            textView.setSelectedRange(NSRange(location: 0, length: 0))
+        }
+        textView.header = header
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let textView = scrollView.documentView as? MarkdownTextView else { return }
+        if let header = textView.header {
+            // Never clobber the title while the user is typing in it.
+            if header.field.currentEditor() == nil, header.field.stringValue != title {
+                header.field.stringValue = title
+            }
+            header.setWarning(titleWarning)
+            textView.layoutHeader()
+        }
         if textView.string != text {
             let selection = textView.selectedRange()
             textView.string = text
@@ -68,15 +99,72 @@ struct MarkdownEditor: NSViewRepresentable {
     }
 }
 
-/// NSTextView subclass that adds Markdown formatting key equivalents.
+/// NSTextView subclass that adds Markdown formatting key equivalents and
+/// hosts the inline title above the first line of text.
 final class MarkdownTextView: NSTextView {
+    static let bodyInset = NSSize(width: 12, height: 12)
+
+    /// Drawn as a subview in the top inset; the text container starts below it.
+    var header: InlineTitleHeader? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            if let header { addSubview(header) }
+            layoutHeader()
+        }
+    }
+    private var headerHeight: CGFloat = 0
+
+    /// Sizes the header to the view's width and reserves room for it. NSTextView
+    /// pads top and bottom by the same `textContainerInset.height`, so the
+    /// inset grows by half the header and `textContainerOrigin` shifts the
+    /// text down by the rest — leaving the usual padding at the bottom.
+    func layoutHeader() {
+        let height = header?.preferredHeight ?? 0
+        header?.frame = NSRect(x: 0, y: 0, width: bounds.width, height: height)
+        guard height != headerHeight else { return }
+        headerHeight = height
+        textContainerInset = NSSize(
+            width: Self.bodyInset.width, height: Self.bodyInset.height + height / 2)
+        invalidateTextContainerOrigin()
+        needsDisplay = true
+    }
+
+    override var textContainerOrigin: NSPoint {
+        NSPoint(x: textContainerInset.width, y: Self.bodyInset.height + headerHeight)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        header?.frame.size.width = newSize.width
+    }
+
+    /// ↑ on the first line moves into the title, like Obsidian.
+    override func moveUp(_ sender: Any?) {
+        if let header, caretIsOnFirstLine {
+            header.focusField(in: window)
+        } else {
+            super.moveUp(sender)
+        }
+    }
+
+    private var caretIsOnFirstLine: Bool {
+        let length = (string as NSString).length
+        guard length > 0, let layoutManager else { return true }
+        let caret = selectedRange().location
+        // Past a trailing newline the caret sits on the extra, empty last line.
+        if caret >= length, string.hasSuffix("\n") { return false }
+        let glyph = layoutManager.glyphIndexForCharacter(at: min(caret, length - 1))
+        var line = NSRange()
+        layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: &line)
+        return line.location == 0
+    }
 
     static func make() -> MarkdownTextView {
         let textView = MarkdownTextView(frame: .zero)
         textView.isRichText = false
         textView.allowsUndo = true
         textView.font = MarkdownStyler.baseFont
-        textView.textContainerInset = NSSize(width: 12, height: 12)
+        textView.textContainerInset = bodyInset
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -225,5 +313,108 @@ enum MarkdownStyler {
             }
         }
         storage.endEditing()
+    }
+}
+
+/// Obsidian-style inline title: a large accent-colored field above the note
+/// body. Keystrokes report through `onEdit` (the view model debounces the
+/// rename); leaving the field fires `onCommit`; Enter, ↓, or Tab move to the
+/// body via `onExit`.
+final class InlineTitleHeader: NSView, NSTextFieldDelegate {
+    let field = NSTextField()
+    private let warning = NSTextField(labelWithString: "")
+    var onEdit: ((String) -> Void)?
+    var onCommit: (() -> Void)?
+    var onExit: (() -> Void)?
+    var wantsInitialFocus = false
+
+    /// Aligns the title's first glyph with the body text: text container
+    /// inset plus the line fragment padding, minus the field cell's own inset.
+    private static let leading = MarkdownTextView.bodyInset.width + 5 - 2
+    private static let top: CGFloat = 16
+    private static let gap: CGFloat = 4
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 26, weight: .bold)
+        field.textColor = .controlAccentColor
+        field.placeholderString = "Untitled"
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        field.delegate = self
+        addSubview(field)
+
+        warning.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        warning.textColor = .systemOrange
+        warning.isHidden = true
+        addSubview(warning)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    var preferredHeight: CGFloat {
+        var height = Self.top + field.intrinsicContentSize.height
+        if !warning.isHidden { height += Self.gap + warning.intrinsicContentSize.height }
+        return height
+    }
+
+    func setWarning(_ message: String?) {
+        warning.stringValue = message ?? ""
+        warning.isHidden = message == nil
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let width = max(0, bounds.width - Self.leading * 2)
+        let fieldHeight = field.intrinsicContentSize.height
+        field.frame = NSRect(x: Self.leading, y: Self.top, width: width, height: fieldHeight)
+        warning.frame = NSRect(
+            x: Self.leading + 2, y: Self.top + fieldHeight + Self.gap,
+            width: width, height: warning.intrinsicContentSize.height)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard wantsInitialFocus, let window else { return }
+        wantsInitialFocus = false
+        DispatchQueue.main.async { [weak self] in self?.focusField(in: window) }
+    }
+
+    func focusField(in window: NSWindow?) {
+        guard let window, window.makeFirstResponder(field) else { return }
+        // Put the caret at the end instead of selecting the whole title.
+        if let editor = field.currentEditor() {
+            editor.selectedRange = NSRange(location: (field.stringValue as NSString).length, length: 0)
+        }
+    }
+
+    // MARK: NSTextFieldDelegate
+
+    func controlTextDidChange(_ notification: Notification) {
+        onEdit?(field.stringValue)
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        onCommit?()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.insertNewline(_:)),
+             #selector(NSResponder.moveDown(_:)),
+             #selector(NSResponder.insertTab(_:)):
+            onExit?()
+            return true
+        default:
+            return false
+        }
     }
 }

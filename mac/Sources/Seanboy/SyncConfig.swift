@@ -16,8 +16,7 @@ import SeanboyCore
 /// the file when pointing at another S3-compatible host.
 enum SyncConfigFile {
     static var fileURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Seanboy/sync.json")
+        AppSettings.supportDirectory.appendingPathComponent("sync.json")
     }
 
     static func load() -> S3Config? {
