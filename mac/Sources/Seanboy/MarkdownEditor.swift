@@ -33,7 +33,8 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         context.coordinator.textView = textView
         textView.string = text
-        context.coordinator.applyStyling()
+        context.coordinator.styleAll()
+        textView.textStorage?.delegate = context.coordinator
 
         let header = InlineTitleHeader()
         header.field.stringValue = title
@@ -61,27 +62,25 @@ struct MarkdownEditor: NSViewRepresentable {
             header.setWarning(titleWarning)
             textView.layoutHeader()
         }
-        if textView.string != text {
-            let selection = textView.selectedRange()
-            textView.string = text
-            let limit = (text as NSString).length
-            textView.setSelectedRange(NSRange(location: min(selection.location, limit), length: 0))
-            context.coordinator.applyStyling()
+        // External changes (watcher, sync) arrive here. Never mid-IME.
+        if textView.string != text, !textView.hasMarkedText() {
+            context.coordinator.applyExternalText(text)
         }
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         var parent: MarkdownEditor
         weak var textView: MarkdownTextView?
+        private var fenceLineCount = 0
+        private var isApplyingExternalText = false
 
         init(_ parent: MarkdownEditor) {
             self.parent = parent
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView else { return }
+            guard let textView, !isApplyingExternalText else { return }
             parent.text = textView.string
-            applyStyling()
         }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
@@ -92,9 +91,78 @@ struct MarkdownEditor: NSViewRepresentable {
             return true
         }
 
-        func applyStyling() {
+        // MARK: Styling
+
+        func styleAll() {
             guard let storage = textView?.textStorage else { return }
-            MarkdownStyler.style(storage)
+            fenceLineCount = MarkdownSpans.fenceLineCount(storage.string)
+            storage.beginEditing()
+            MarkdownStyler.restyle(storage, around: NSRange(location: 0, length: storage.length))
+            storage.endEditing()
+        }
+
+        /// Restyles only the edited lines. Adding, removing, or changing a
+        /// code fence can restyle everything below it, so that restyles to
+        /// the end. Skipped while IME text is being composed — resetting
+        /// attributes would erase its marked-text underline; the commit is
+        /// itself an edit and restyles.
+        func textStorage(_ storage: NSTextStorage, didProcessEditing mask: NSTextStorageEditActions,
+                         range edited: NSRange, changeInLength delta: Int) {
+            guard mask.contains(.editedCharacters), textView?.hasMarkedText() != true else { return }
+            let ns = storage.string as NSString
+            let lines = ns.substring(with: ns.lineRange(for: edited))
+            let fences = MarkdownSpans.fenceLineCount(storage.string)
+            if fences != fenceLineCount || lines.contains("```") || lines.contains("~~~") {
+                fenceLineCount = fences
+                MarkdownStyler.restyle(storage, around: NSRange(
+                    location: edited.location, length: storage.length - edited.location))
+            } else {
+                MarkdownStyler.restyle(storage, around: edited)
+            }
+        }
+
+        // MARK: External edits
+
+        /// Replaces only the part of the text that differs, as one undoable
+        /// edit, so the selection, scroll position, and undo history survive
+        /// a file changing underneath the editor.
+        func applyExternalText(_ text: String) {
+            guard let textView, let storage = textView.textStorage else { return }
+            let old = Array(textView.string.utf16)
+            let new = Array(text.utf16)
+            var prefix = 0
+            while prefix < min(old.count, new.count), old[prefix] == new[prefix] { prefix += 1 }
+            var suffix = 0
+            while suffix < min(old.count, new.count) - prefix,
+                  old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
+            // Don't split a surrogate pair.
+            if prefix > 0, UTF16.isLeadSurrogate(old[prefix - 1]) { prefix -= 1 }
+            if suffix > 0, UTF16.isTrailSurrogate(old[old.count - suffix]) { suffix -= 1 }
+
+            let range = NSRange(location: prefix, length: old.count - prefix - suffix)
+            let replacement = String(utf16CodeUnits: Array(new[prefix..<(new.count - suffix)]),
+                                     count: new.count - prefix - suffix)
+            let delta = (replacement as NSString).length - range.length
+
+            var selection = textView.selectedRange()
+            if selection.location >= NSMaxRange(range) {
+                selection.location += delta
+            } else if NSMaxRange(selection) > range.location {
+                selection = NSRange(location: min(selection.location, range.location + (replacement as NSString).length), length: 0)
+            }
+
+            isApplyingExternalText = true
+            defer { isApplyingExternalText = false }
+            if textView.shouldChangeText(in: range, replacementString: replacement) {
+                storage.replaceCharacters(in: range, with: replacement)
+                textView.didChangeText()
+            } else {
+                textView.string = text
+                styleAll()
+            }
+            let length = (textView.string as NSString).length
+            textView.setSelectedRange(NSRange(location: min(selection.location, length),
+                                              length: min(selection.length, length - min(selection.location, length))))
         }
     }
 }
@@ -170,6 +238,11 @@ final class MarkdownTextView: NSTextView {
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.usesFindBar = true
+        textView.linkTextAttributes = [
+            .foregroundColor: NSColor.controlAccentColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .cursor: NSCursor.pointingHand,
+        ]
         textView.drawsBackground = false
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -221,98 +294,6 @@ final class MarkdownTextView: NSTextView {
         let selected = range.length > 0 ? (string as NSString).substring(with: range) : "Note Title"
         insert("[[\(selected)]]", in: range,
                selectFrom: 2, length: (selected as NSString).length)
-    }
-}
-
-/// Applies Markdown-ish attributes across the whole text storage.
-/// Notes are small, so restyling everything per keystroke is fine.
-enum MarkdownStyler {
-    static let baseFont = NSFont.systemFont(ofSize: 15)
-
-    private struct Rule {
-        let regex: NSRegularExpression
-        let apply: (NSTextStorage, NSTextCheckingResult) -> Void
-    }
-
-    private static func rx(_ pattern: String) -> NSRegularExpression {
-        try! NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines])
-    }
-
-    nonisolated(unsafe) private static let rules: [Rule] = [
-        // # Headings — bigger and bolder by level
-        Rule(regex: rx(#"^(#{1,3})[ \t].*$"#)) { storage, match in
-            let hashes = storage.mutableString.substring(with: match.range(at: 1)).count
-            let size: CGFloat = [24, 20, 17][min(hashes, 3) - 1]
-            storage.addAttribute(.font, value: NSFont.systemFont(ofSize: size, weight: .bold),
-                                 range: match.range)
-        },
-        // **bold**
-        Rule(regex: rx(#"\*\*([^*\n]+)\*\*"#)) { storage, match in
-            storage.addAttribute(.font, value: NSFont.boldSystemFont(ofSize: 15), range: match.range)
-            fade(storage, match.range, markerLength: 2)
-        },
-        // *italic* (not part of **)
-        Rule(regex: rx(#"(?<![*\w])\*([^*\n]+)\*(?![*\w])"#)) { storage, match in
-            let italic = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
-            storage.addAttribute(.font, value: italic, range: match.range)
-            fade(storage, match.range, markerLength: 1)
-        },
-        // ==highlight== — Tomboy's yellow marker
-        Rule(regex: rx(#"==([^=\n]+)=="#)) { storage, match in
-            storage.addAttribute(.backgroundColor,
-                                 value: NSColor.systemYellow.withAlphaComponent(0.35),
-                                 range: match.range)
-            fade(storage, match.range, markerLength: 2)
-        },
-        // `inline code`
-        Rule(regex: rx(#"`([^`\n]+)`"#)) { storage, match in
-            storage.addAttribute(.font,
-                                 value: NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular),
-                                 range: match.range)
-            storage.addAttribute(.foregroundColor, value: NSColor.systemPink, range: match.range)
-        },
-        // - bullets / * bullets: tint the marker
-        Rule(regex: rx(#"^[ \t]*([-*+])[ \t]"#)) { storage, match in
-            storage.addAttribute(.foregroundColor, value: NSColor.controlAccentColor,
-                                 range: match.range(at: 1))
-        },
-        // [[Wiki Link]] — clickable, opens/creates the note
-        Rule(regex: rx(#"\[\[([^\[\]\n]+)\]\]"#)) { storage, match in
-            let title = storage.mutableString.substring(with: match.range(at: 1))
-                .trimmingCharacters(in: .whitespaces)
-            guard !title.isEmpty,
-                  let encoded = title.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
-                  let url = URL(string: "seanboy://\(encoded)") else { return }
-            storage.addAttribute(.link, value: url, range: match.range)
-            storage.addAttribute(.foregroundColor, value: NSColor.controlAccentColor,
-                                 range: match.range)
-            storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue,
-                                 range: match.range)
-        },
-    ]
-
-    private static func fade(_ storage: NSTextStorage, _ range: NSRange, markerLength: Int) {
-        let color = NSColor.tertiaryLabelColor
-        storage.addAttribute(.foregroundColor, value: color,
-                             range: NSRange(location: range.location, length: markerLength))
-        storage.addAttribute(.foregroundColor, value: color,
-                             range: NSRange(location: range.location + range.length - markerLength,
-                                            length: markerLength))
-    }
-
-    static func style(_ storage: NSTextStorage) {
-        let full = NSRange(location: 0, length: storage.length)
-        storage.beginEditing()
-        storage.setAttributes([
-            .font: baseFont,
-            .foregroundColor: NSColor.labelColor,
-        ], range: full)
-        for rule in rules {
-            for match in rule.regex.matches(in: storage.string, range: full) {
-                rule.apply(storage, match)
-            }
-        }
-        storage.endEditing()
     }
 }
 

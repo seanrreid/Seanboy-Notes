@@ -47,14 +47,43 @@ public struct MarkdownSpan: Equatable, Sendable {
 public enum MarkdownSpans {
 
     public static func parse(_ text: String) -> [MarkdownSpan] {
+        parse(text, linesTouching: NSRange(location: 0, length: (text as NSString).length)).spans
+    }
+
+    /// Incremental parse for the editor: the spans of every line touching
+    /// `range`, widened so a code block is always parsed whole. `covered` is
+    /// the exact range those spans describe — restyle that, nothing more.
+    ///
+    /// Only a cheap fence scan runs before `range`, so the cost is
+    /// proportional to the edited lines, not the note.
+    public static func parse(_ text: String, linesTouching range: NSRange)
+        -> (spans: [MarkdownSpan], covered: NSRange)
+    {
         let ns = text as NSString
+        let clamped = NSRange(location: min(range.location, ns.length),
+                              length: min(range.length, ns.length - min(range.location, ns.length)))
+        let lines = ns.lineRange(for: clamped)
+
+        // If the edit is inside a code block, start at its opening fence.
+        var start = lines.location
+        if let fenceStart = openFenceStart(in: ns, before: lines.location) {
+            start = fenceStart
+        }
+
         var spans: [MarkdownSpan] = []
         var openFence: (line: NSRange, marker: String, bodyStart: Int)?
-        var previousLineEnd = 0
+        var previousLineEnd = start
+        var coveredEnd = ns.length
 
         ns.enumerateSubstrings(
-            in: NSRange(location: 0, length: ns.length), options: [.byLines, .substringNotRequired]
-        ) { _, line, enclosing, _ in
+            in: NSRange(location: start, length: ns.length - start),
+            options: [.byLines, .substringNotRequired]
+        ) { _, line, enclosing, stop in
+            if line.location >= NSMaxRange(lines), line.location > clamped.location, openFence == nil {
+                coveredEnd = enclosing.location
+                stop.pointee = true
+                return
+            }
             defer { previousLineEnd = NSMaxRange(line) }
             let lineText = ns.substring(with: line)
 
@@ -91,11 +120,51 @@ public enum MarkdownSpans {
                 markers: [fence.line]))
         }
 
-        return spans.sorted {
+        spans.sort {
             $0.range.location != $1.range.location
                 ? $0.range.location < $1.range.location
                 : $0.range.length > $1.range.length
         }
+        return (spans, NSRange(location: start, length: coveredEnd - start))
+    }
+
+    /// Number of lines that open or close a code fence. When it changes, an
+    /// edit may have restyled everything below it.
+    public static func fenceLineCount(_ text: String) -> Int {
+        var count = 0
+        (text as NSString).enumerateSubstrings(
+            in: NSRange(location: 0, length: (text as NSString).length),
+            options: [.byLines]
+        ) { line, _, _, _ in
+            if let line, looksLikeFence(line), openingFence(line) != nil { count += 1 }
+        }
+        return count
+    }
+
+    /// Start of the code block that's still open at `location`, if any.
+    private static func openFenceStart(in ns: NSString, before location: Int) -> Int? {
+        var open: (start: Int, marker: String)?
+        ns.enumerateSubstrings(
+            in: NSRange(location: 0, length: location), options: [.byLines]
+        ) { line, range, _, _ in
+            guard let line, looksLikeFence(line) else { return }
+            if let fence = open {
+                if isFence(line, closing: fence.marker) { open = nil }
+            } else if let marker = openingFence(line) {
+                open = (range.location, marker)
+            }
+        }
+        return open?.start
+    }
+
+    /// Cheap pre-check before any regex: fences start with ``` or ~~~ after
+    /// at most three spaces.
+    private static func looksLikeFence(_ line: String) -> Bool {
+        for (i, c) in line.utf16.enumerated() {
+            if c == 0x20, i < 3 { continue }
+            return c == 0x60 || c == 0x7E  // ` or ~
+        }
+        return false
     }
 
     // MARK: - Code fences

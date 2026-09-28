@@ -74,6 +74,60 @@ final class MarkdownSpansFixtureTests: XCTestCase {
         }
     }
 
+    private static let mixedNote = """
+    # Title with **bold**
+    - item [[Link]]
+      - [ ] nested task
+    ```swift
+    let x = **not bold**
+    ```
+    > quote with ==mark==
+
+    ~~~
+    unclosed? no, closed:
+    ~~~
+    1. last `code`
+    ```
+    trailing open fence
+    """
+
+    /// Every incremental parse agrees with the full parse over the range it
+    /// claims to cover, and covers the lines it was asked about.
+    func testIncrementalMatchesFullParse() {
+        let text = Self.mixedNote
+        let ns = text as NSString
+        let full = MarkdownSpans.parse(text)
+        for location in 0...ns.length {
+            let (spans, covered) = MarkdownSpans.parse(
+                text, linesTouching: NSRange(location: location, length: 0))
+            let asked = ns.lineRange(for: NSRange(location: min(location, ns.length), length: 0))
+            XCTAssertTrue(covered.location <= asked.location
+                              && NSMaxRange(covered) >= NSMaxRange(asked),
+                          "covered \(covered) misses line \(asked) at \(location)")
+            let expected = full.filter {
+                $0.range.location >= covered.location && NSMaxRange($0.range) <= NSMaxRange(covered)
+            }
+            XCTAssertEqual(spans, expected, "at \(location)")
+        }
+    }
+
+    func testIncrementalInsideCodeBlockCoversWholeBlock() {
+        let text = "a\n```\nx\ny\n```\nb"
+        let (spans, covered) = MarkdownSpans.parse(text, linesTouching: NSRange(location: 8, length: 0))
+        XCTAssertEqual((text as NSString).substring(with: covered), "```\nx\ny\n```\n")
+        XCTAssertEqual(spans.map(\.kind), [.codeBlock])
+    }
+
+    func testFenceLineCount() {
+        XCTAssertEqual(MarkdownSpans.fenceLineCount("```\nx\n```\n   ~~~\n    ```"), 3)
+    }
+
+    func testIncrementalParseIsFastOnLargeNotes() {
+        let note = String(repeating: "- item with [[Link]] and **bold** text\n", count: 6_000)
+        let middle = NSRange(location: (note as NSString).length / 2, length: 0)
+        measure { _ = MarkdownSpans.parse(note, linesTouching: middle) }
+    }
+
     func testEmptyInput() {
         XCTAssertEqual(MarkdownSpans.parse(""), [])
     }
