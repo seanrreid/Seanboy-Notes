@@ -32,6 +32,10 @@ struct MarkdownEditor: NSViewRepresentable {
 
         textView.delegate = context.coordinator
         context.coordinator.textView = textView
+        textView.layoutManager?.delegate = context.coordinator.layout
+        textView.onFocusChange = { [weak coordinator = context.coordinator] in
+            coordinator?.updateRevealedLines()
+        }
         textView.string = text
         context.coordinator.styleAll()
         textView.textStorage?.delegate = context.coordinator
@@ -73,6 +77,10 @@ struct MarkdownEditor: NSViewRepresentable {
         weak var textView: MarkdownTextView?
         private var fenceLineCount = 0
         private var isApplyingExternalText = false
+        /// Lines whose markers are visible: the cursor/selection lines while
+        /// the editor has focus, else nil (everything rendered).
+        private(set) var revealedLines: NSRange?
+        let layout = LivePreviewLayout()
 
         init(_ parent: MarkdownEditor) {
             self.parent = parent
@@ -96,9 +104,41 @@ struct MarkdownEditor: NSViewRepresentable {
         func styleAll() {
             guard let storage = textView?.textStorage else { return }
             fenceLineCount = MarkdownSpans.fenceLineCount(storage.string)
+            revealedLines = currentRevealedLines()
             storage.beginEditing()
-            MarkdownStyler.restyle(storage, around: NSRange(location: 0, length: storage.length))
+            MarkdownStyler.restyle(storage, around: NSRange(location: 0, length: storage.length),
+                                   revealing: revealedLines)
             storage.endEditing()
+        }
+
+        private func currentRevealedLines() -> NSRange? {
+            guard let textView, textView.isEditorFocused else { return nil }
+            let ns = textView.string as NSString
+            let selection = textView.selectedRange()
+            let clamped = NSRange(location: min(selection.location, ns.length),
+                                  length: min(selection.length, ns.length - min(selection.location, ns.length)))
+            return ns.lineRange(for: clamped)
+        }
+
+        /// Moving the cursor to another line (or focus in/out) swaps which
+        /// lines show their markers: restyle the old and new cursor lines.
+        func updateRevealedLines() {
+            guard let storage = textView?.textStorage else { return }
+            let new = currentRevealedLines()
+            guard new != revealedLines else { return }
+            let old = revealedLines
+            revealedLines = new
+            storage.beginEditing()
+            for lines in [old, new].compactMap({ $0 }) {
+                let clamped = NSRange(location: min(lines.location, storage.length),
+                                      length: min(lines.length, storage.length - min(lines.location, storage.length)))
+                MarkdownStyler.restyle(storage, around: clamped, revealing: new)
+            }
+            storage.endEditing()
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            updateRevealedLines()
         }
 
         /// Restyles only the edited lines. Adding, removing, or changing a
@@ -110,14 +150,20 @@ struct MarkdownEditor: NSViewRepresentable {
                          range edited: NSRange, changeInLength delta: Int) {
             guard mask.contains(.editedCharacters), textView?.hasMarkedText() != true else { return }
             let ns = storage.string as NSString
-            let lines = ns.substring(with: ns.lineRange(for: edited))
+            let editedLines = ns.lineRange(for: edited)
+            let lines = ns.substring(with: editedLines)
+            // Typing happens at the cursor, so the edited lines are the
+            // revealed ones; a selection change right after corrects any
+            // edit made elsewhere (undo, external changes).
+            if textView?.isEditorFocused == true { revealedLines = editedLines }
             let fences = MarkdownSpans.fenceLineCount(storage.string)
             if fences != fenceLineCount || lines.contains("```") || lines.contains("~~~") {
                 fenceLineCount = fences
                 MarkdownStyler.restyle(storage, around: NSRange(
-                    location: edited.location, length: storage.length - edited.location))
+                    location: edited.location, length: storage.length - edited.location),
+                    revealing: revealedLines)
             } else {
-                MarkdownStyler.restyle(storage, around: edited)
+                MarkdownStyler.restyle(storage, around: edited, revealing: revealedLines)
             }
         }
 
@@ -181,6 +227,74 @@ final class MarkdownTextView: NSTextView {
         }
     }
     private var headerHeight: CGFloat = 0
+
+    /// Focus drives Live Preview: without focus every line is rendered.
+    private(set) var isEditorFocused = false
+    var onFocusChange: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted {
+            isEditorFocused = true
+            onFocusChange?()
+        }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted {
+            isEditorFocused = false
+            onFocusChange?()
+        }
+        return accepted
+    }
+
+    // MARK: Live Preview decorations
+
+    /// Quote bars, code block backgrounds, and horizontal rules, drawn
+    /// behind the text for lines tagged by `MarkdownStyler`.
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard let layoutManager, let textContainer, let storage = textStorage else { return }
+        let origin = textContainerOrigin
+        let visible = rect.offsetBy(dx: -origin.x, dy: -origin.y)
+        let glyphs = layoutManager.glyphRange(forBoundingRect: visible, in: textContainer)
+        let characters = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        let width = textContainer.size.width
+
+        func lineRects(_ range: NSRange) -> [NSRect] {
+            var rects: [NSRect] = []
+            let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { lineRect, _, _, _, _ in
+                rects.append(lineRect.offsetBy(dx: origin.x, dy: origin.y))
+            }
+            return rects
+        }
+
+        storage.enumerateAttribute(.livePreviewCodeBlock, in: characters) { value, range, _ in
+            guard value != nil else { return }
+            let rects = lineRects(range)
+            guard let first = rects.first, let last = rects.last else { return }
+            let block = NSRect(x: origin.x, y: first.minY, width: width, height: last.maxY - first.minY)
+            NSColor.quaternaryLabelColor.withAlphaComponent(0.08).setFill()
+            NSBezierPath(roundedRect: block, xRadius: 6, yRadius: 6).fill()
+        }
+        storage.enumerateAttribute(.livePreviewQuote, in: characters) { value, range, _ in
+            guard value != nil else { return }
+            NSColor.controlAccentColor.withAlphaComponent(0.6).setFill()
+            for line in lineRects(range) {
+                NSRect(x: origin.x + 5, y: line.minY + 2, width: 3, height: line.height - 4).fill()
+            }
+        }
+        storage.enumerateAttribute(.livePreviewRule, in: characters) { value, range, _ in
+            guard value != nil else { return }
+            NSColor.separatorColor.setFill()
+            for line in lineRects(range) {
+                NSRect(x: origin.x + 5, y: line.midY.rounded(), width: width - 10, height: 1).fill()
+            }
+        }
+    }
 
     /// Sizes the header to the view's width and reserves room for it. NSTextView
     /// pads top and bottom by the same `textContainerInset.height`, so the

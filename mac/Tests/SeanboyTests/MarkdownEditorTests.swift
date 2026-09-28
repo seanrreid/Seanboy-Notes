@@ -20,9 +20,35 @@ final class MarkdownEditorTests: XCTestCase {
         textView = MarkdownTextView.make()
         textView.delegate = coordinator
         coordinator.textView = textView
+        textView.layoutManager?.delegate = coordinator.layout
+        textView.onFocusChange = { [weak coordinator] in coordinator?.updateRevealedLines() }
         textView.string = initial
         coordinator.styleAll()
         textView.textStorage?.delegate = coordinator
+    }
+
+    private var window: NSWindow?
+
+    /// Puts the editor in an offscreen window and focuses it, cursor at `location`.
+    private func focus(at location: Int) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: true)
+        textView.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        window.contentView = textView
+        self.window = window
+        textView.setSelectedRange(NSRange(location: location, length: 0))
+        XCTAssertTrue(window.makeFirstResponder(textView))
+    }
+
+    private func isHidden(_ index: Int) -> Bool {
+        textView.textStorage?.attribute(.livePreviewHidden, at: index, effectiveRange: nil) != nil
+    }
+
+    private func glyphIsNull(_ index: Int) -> Bool {
+        let layoutManager = textView.layoutManager!
+        layoutManager.ensureGlyphs(forCharacterRange: NSRange(location: 0, length: textView.string.utf16.count))
+        let glyph = layoutManager.glyphIndexForCharacter(at: index)
+        return layoutManager.propertyForGlyph(at: glyph).contains(.null)
     }
 
     private func type(_ string: String, at location: Int? = nil) {
@@ -105,6 +131,80 @@ final class MarkdownEditorTests: XCTestCase {
                        "seanboy://Ideas")
         XCTAssertEqual((storage.attribute(.link, at: 16, effectiveRange: nil) as? URL)?.absoluteString,
                        "https://example.com")
+    }
+
+    // MARK: Live Preview
+
+    func testUnfocusedEditorRendersEveryLine() {
+        makeEditor("# Title\n**bold** and [[Link]]")
+        XCTAssertTrue(isHidden(0), "# hidden")
+        XCTAssertTrue(isHidden(8) && isHidden(9), "** hidden")
+        XCTAssertFalse(isHidden(10), "bold content visible")
+        XCTAssertTrue(isHidden(21) && isHidden(22), "[[ hidden")
+        XCTAssertTrue(glyphIsNull(0), "hidden markers become null glyphs")
+        XCTAssertFalse(glyphIsNull(2))
+    }
+
+    func testCursorLineRevealsOnlyItsMarkers() {
+        makeEditor("**one**\n**two**")
+        focus(at: 10)  // inside "two"
+        XCTAssertTrue(isHidden(0), "other line still rendered")
+        XCTAssertFalse(isHidden(8), "cursor line shows its markers")
+        XCTAssertFalse(glyphIsNull(8))
+
+        textView.setSelectedRange(NSRange(location: 2, length: 0))  // move to line 1
+        XCTAssertFalse(isHidden(0))
+        XCTAssertTrue(isHidden(8), "the old cursor line is rendered again")
+    }
+
+    func testSelectionRevealsEveryLineItTouches() {
+        makeEditor("**a**\n**b**\n**c**")
+        focus(at: 0)
+        textView.setSelectedRange(NSRange(location: 2, length: 7))  // from line 1 into line 2
+        XCTAssertFalse(isHidden(0))
+        XCTAssertFalse(isHidden(6))
+        XCTAssertTrue(isHidden(12))
+    }
+
+    func testLosingFocusRendersTheCursorLine() {
+        makeEditor("**one**")
+        focus(at: 3)
+        XCTAssertFalse(isHidden(0))
+        window?.makeFirstResponder(nil)
+        XCTAssertTrue(isHidden(0))
+    }
+
+    func testTypingOnTheCursorLineKeepsMarkersVisible() {
+        makeEditor("")
+        focus(at: 0)
+        type("**hi**")
+        XCTAssertEqual(text, "**hi**")
+        XCTAssertFalse(isHidden(0))
+        type("\nnext")
+        XCTAssertTrue(isHidden(0), "leaving the line renders it")
+    }
+
+    func testCodeBlockFencesShowOnlyWithCursorInside() {
+        makeEditor("```\ncode\n```\nafter")
+        focus(at: 16)  // "after"
+        XCTAssertTrue(isHidden(0) && isHidden(9), "fences hidden")
+        textView.setSelectedRange(NSRange(location: 5, length: 0))  // inside the block
+        XCTAssertFalse(isHidden(0))
+        XCTAssertFalse(isHidden(9), "both fences show when the cursor is anywhere in the block")
+    }
+
+    func testBulletsAlwaysRenderAsBulletGlyph() {
+        makeEditor("- item")
+        focus(at: 3)
+        let storage = textView.textStorage!
+        XCTAssertNotNil(storage.attribute(.livePreviewBullet, at: 0, effectiveRange: nil))
+        XCTAssertEqual(storage.string, "- item", "file text keeps the dash")
+        let layoutManager = textView.layoutManager!
+        layoutManager.ensureGlyphs(forCharacterRange: NSRange(location: 0, length: 6))
+        let font = storage.attribute(.font, at: 0, effectiveRange: nil) as! NSFont
+        var dash: UniChar = 0x2D, dashGlyph: CGGlyph = 0
+        CTFontGetGlyphsForCharacters(font as CTFont, &dash, &dashGlyph, 1)
+        XCTAssertNotEqual(layoutManager.cgGlyph(at: 0), dashGlyph)
     }
 
     func testBoldInsideHeadingKeepsHeadingSize() {
