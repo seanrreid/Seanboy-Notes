@@ -39,7 +39,8 @@ exactly as before.
    keeps `Untitled.md` (made unique as `Untitled 2`, and so on). A name that
    clashes with an existing note shows an inline warning and doesn't rename
    (GNote's `NoteRenameWatcher` behavior), instead of silently adding a
-   suffix.
+   suffix. A collapsed **Properties** row under the title holds the note's
+   frontmatter (see Decisions).
 2. **Live Preview rendering.** On every line except the one with the cursor,
    the syntax markers are hidden and the text is shown formatted. On the
    cursor line the markers show, faded. If there's a selection, every line it
@@ -161,22 +162,28 @@ exactly as before.
    link rendering, quotes, rules, and code blocks.
 5. **Mac lists and checkboxes.** Enter/Tab/Backspace/Home rules, bullet and
    checkbox glyphs, click to toggle.
-6. **Android: inline title, then the Kotlin `MarkdownSpans` port** (running
+6. **Properties row, Mac.** Collapsed/expanded frontmatter editor with
+   byte-faithful round-trip tests, extending the existing Obsidian
+   frontmatter fixtures.
+7. **Android: inline title, then the Kotlin `MarkdownSpans` port** (running
    the same fixtures), then the span-based `EditText` with list rules and
    checkboxes.
-7. **Stretch: auto-links to existing note titles** on both platforms.
+8. **Stretch: auto-links to existing note titles** on both platforms.
 
-## Open Questions
+## Decisions
 
-- **Revealing markers:** by line (Obsidian), or only the span under the
-  cursor (Typora)? Lean: by line, since it's easier to predict and matches
-  the reference.
-- **YAML frontmatter:** hide it entirely (it's managed data) or show a
-  collapsed "Properties" row like Obsidian? Lean: hide it, and show
-  Obsidian `tags` as chips under the title later.
-- **Android formatting bar:** a row above the keyboard (bold, list,
-  checkbox, link) is standard on mobile and may be needed for use with a
-  touch keyboard.
-- **Accent color:** use the system accent (Mac) and Material You dynamic
-  color (Android), or a Seanboy brand accent? GNote 51 moved to the system
-  accent.
+- **Revealing markers: by line** (Obsidian). Every line the cursor or
+  selection touches shows its markers; every other line is rendered.
+- **Frontmatter: a collapsed "Properties" row** under the title (Obsidian
+  model), so it's easy to edit. When collapsed, it's one faded line listing
+  the unmanaged keys (e.g. `tags · aliases`), or it's hidden when there are
+  none. When expanded, it's a small monospaced text area editing the raw
+  unmanaged YAML lines (`Note.extraFrontmatter`) verbatim. The managed keys
+  (`id`, `created`, `modified`) are never shown or editable. Edits commit on
+  focus-out with the same flush points as the title. Frontmatter is still
+  stored separately from the body, so the body buffer never contains it.
+- **No Android formatting bar.** Markdown typed by hand plus list
+  auto-continuation is enough; revisit if it hurts in use.
+- **System accent color** on both platforms: `controlAccentColor` on Mac,
+  and Material You dynamic color on Android (API 31+, falling back to the
+  current theme primary). This matches GNote 51.
