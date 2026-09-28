@@ -111,6 +111,64 @@ final class NoteDocumentTests: XCTestCase {
         XCTAssertFalse(NoteDocument.serialize(note).contains("title:"))
     }
 
+    // MARK: Properties editing
+
+    private func note(_ extras: [String]) -> Note {
+        var note = Note(title: "Daily", body: "body")
+        note.extraFrontmatter = extras
+        return note
+    }
+
+    private func obsidianNote() -> Note {
+        note(["tags:", "  - journal", "aliases: [JRN]", "", "cssclass: wide"])
+    }
+
+    func testPropertiesUnchangedTextIsByteFaithful() {
+        let note = note(["tags: x", "", ""])
+        let text = NoteDocument.propertiesText(for: note)
+        XCTAssertEqual(NoteDocument.editedFrontmatter(text, for: note), .accepted(["tags: x", "", ""]),
+                       "trailing blank lines from the file survive when nothing was edited")
+    }
+
+    func testPropertiesEditAcceptsNormalYAML() {
+        let note = obsidianNote()
+        let edited = "tags:\n  - journal\n  - ideas\naliases: [JRN]\nstatus: draft\n\n"
+        XCTAssertEqual(NoteDocument.editedFrontmatter(edited, for: note),
+                       .accepted(["tags:", "  - journal", "  - ideas", "aliases: [JRN]", "status: draft"]))
+    }
+
+    func testPropertiesEditCanClearEverything() {
+        XCTAssertEqual(NoteDocument.editedFrontmatter("", for: obsidianNote()), .accepted([]))
+    }
+
+    func testPropertiesEditRejectsBlockTerminator() {
+        let result = NoteDocument.editedFrontmatter("tags: x\n---\nmore: y", for: obsidianNote())
+        guard case .rejected(let lines) = result else { return XCTFail("expected rejection") }
+        XCTAssertTrue(lines.contains("---"))
+    }
+
+    func testPropertiesEditRejectsManagedKeys() {
+        let note = obsidianNote()
+        for line in ["created: 2026-01-01T00:00:00Z", "seanboy-id: \(UUID().uuidString)",
+                     "deleted: true", "title: Sneaky"] {
+            XCTAssertEqual(NoteDocument.editedFrontmatter("tags: x\n" + line, for: note),
+                           .rejected(lines: [line]), line)
+        }
+    }
+
+    func testPropertiesEditKeepsForeignValuesOfManagedNames() {
+        // Values Seanboy can't parse as its own stay the user's.
+        let note = obsidianNote()
+        XCTAssertEqual(NoteDocument.editedFrontmatter("created: last spring\nid: zettel-42", for: note),
+                       .accepted(["created: last spring", "id: zettel-42"]))
+    }
+
+    func testPropertyKeys() {
+        XCTAssertEqual(NoteDocument.propertyKeys(obsidianNote().extraFrontmatter),
+                       ["tags", "aliases", "cssclass"])
+        XCTAssertEqual(NoteDocument.propertyKeys(["# comment: no", "a: 1", "a: 2", "  b: nested"]), ["a"])
+    }
+
     func testGarbageIsJustBody() {
         let parsed = NoteDocument.parse("")
         XCTAssertNil(parsed.id)

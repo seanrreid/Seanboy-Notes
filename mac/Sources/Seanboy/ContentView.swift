@@ -123,6 +123,10 @@ struct NoteDetailView: View {
                 focusTitle: model.freshNoteID == note.id,
                 onTitleEdit: { model.editTitle($0, for: note.id) },
                 onTitleCommit: { model.flushPendingTitle() },
+                propertiesText: model.propertiesText(for: model.selectedNote ?? note),
+                propertiesWarning: model.propertiesWarning(for: note.id),
+                onPropertiesEdit: { model.editProperties($0, for: note.id) },
+                onPropertiesCommit: { model.flushPendingProperties() },
                 onOpenWikiLink: { model.openNote(titled: $0) }
             )
 

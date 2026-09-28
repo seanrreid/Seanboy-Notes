@@ -14,8 +14,9 @@ final class NotesViewModel: ObservableObject {
     @Published var selectedNoteID: UUID? {
         didSet {
             guard selectedNoteID != oldValue else { return }
-            flushPendingTitle()
+            flushPendingEdits()
             titleClash = nil
+            propertiesRejection = nil
             if freshNoteID != selectedNoteID { freshNoteID = nil }
         }
     }
@@ -28,6 +29,16 @@ final class NotesViewModel: ObservableObject {
     /// same folder already has that name.
     @Published private(set) var titleClash: TitleClash?
     private var pendingTitle: (id: UUID, title: String)?
+    /// Properties text that couldn't be saved as written (see
+    /// `NoteDocument.editedFrontmatter`); shown with a warning until fixed.
+    @Published private(set) var propertiesRejection: PropertiesRejection?
+    private var pendingProperties: (id: UUID, text: String)?
+
+    struct PropertiesRejection: Equatable {
+        let noteID: UUID
+        let attempted: String
+        let lines: [String]
+    }
     private var titleCommitTask: Task<Void, Never>?
 
     struct TitleClash: Equatable {
@@ -181,6 +192,47 @@ final class NotesViewModel: ObservableObject {
         note.body = body
         store.update(note)
         sync.noteDidChange()
+    }
+
+    /// Applies every pending inline edit (title, properties) now.
+    func flushPendingEdits() {
+        flushPendingTitle()
+        flushPendingProperties()
+    }
+
+    // MARK: - Properties (unmanaged frontmatter)
+
+    func propertiesText(for note: Note) -> String {
+        if let rejection = propertiesRejection, rejection.noteID == note.id { return rejection.attempted }
+        return NoteDocument.propertiesText(for: note)
+    }
+
+    func propertiesWarning(for id: UUID) -> String? {
+        guard let rejection = propertiesRejection, rejection.noteID == id else { return nil }
+        let list = rejection.lines.map { "“\($0)”" }.joined(separator: ", ")
+        return "Not saved: \(list) would be lost or break the note’s header. Seanboy manages id, created, and modified itself."
+    }
+
+    /// Called on every keystroke in the Properties editor; saved on
+    /// focus-out and at the same flush points as the title.
+    func editProperties(_ text: String, for id: UUID) {
+        pendingProperties = (id, text)
+    }
+
+    func flushPendingProperties() {
+        guard let (id, text) = pendingProperties else { return }
+        pendingProperties = nil
+        guard var note = store.note(id: id) else { return }
+        switch NoteDocument.editedFrontmatter(text, for: note) {
+        case .accepted(let lines):
+            propertiesRejection = nil
+            guard lines != note.extraFrontmatter else { return }
+            note.extraFrontmatter = lines
+            store.update(note)
+            sync.noteDidChange()
+        case .rejected(let lines):
+            propertiesRejection = PropertiesRejection(noteID: id, attempted: text, lines: lines)
+        }
     }
 
     // MARK: - Inline title

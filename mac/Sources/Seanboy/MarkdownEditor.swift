@@ -17,6 +17,11 @@ struct MarkdownEditor: NSViewRepresentable {
     var focusTitle: Bool
     var onTitleEdit: (String) -> Void
     var onTitleCommit: () -> Void
+    /// The note's unmanaged frontmatter as editable text (Properties row).
+    var propertiesText: String = ""
+    var propertiesWarning: String?
+    var onPropertiesEdit: (String) -> Void = { _ in }
+    var onPropertiesCommit: () -> Void = {}
     var onOpenWikiLink: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -51,6 +56,14 @@ struct MarkdownEditor: NSViewRepresentable {
             textView.window?.makeFirstResponder(textView)
             textView.setSelectedRange(NSRange(location: 0, length: 0))
         }
+        header.setProperties(propertiesText, warning: propertiesWarning)
+        header.onPropertiesEdit = { [weak coordinator = context.coordinator] in
+            coordinator?.parent.onPropertiesEdit($0)
+        }
+        header.onPropertiesCommit = { [weak coordinator = context.coordinator] in
+            coordinator?.parent.onPropertiesCommit()
+        }
+        header.onHeightChange = { [weak textView] in textView?.layoutHeader() }
         textView.header = header
         return scrollView
     }
@@ -64,6 +77,7 @@ struct MarkdownEditor: NSViewRepresentable {
                 header.field.stringValue = title
             }
             header.setWarning(titleWarning)
+            header.setProperties(propertiesText, warning: propertiesWarning)
             textView.layoutHeader()
         }
         // External changes (watcher, sync) arrive here. Never mid-IME.
@@ -312,8 +326,10 @@ final class MarkdownTextView: NSTextView {
     /// inset grows by half the header and `textContainerOrigin` shifts the
     /// text down by the rest — leaving the usual padding at the bottom.
     func layoutHeader() {
+        header?.frame.size.width = bounds.width  // wrapped warnings depend on width
         let height = header?.preferredHeight ?? 0
         header?.frame = NSRect(x: 0, y: 0, width: bounds.width, height: height)
+        header?.needsLayout = true
         guard height != headerHeight else { return }
         headerHeight = height
         textContainerInset = NSSize(
@@ -328,7 +344,7 @@ final class MarkdownTextView: NSTextView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        header?.frame.size.width = newSize.width
+        layoutHeader()
     }
 
     /// ↑ on the first line moves into the title, like Obsidian.
@@ -527,19 +543,32 @@ final class MarkdownTextView: NSTextView {
 /// body. Keystrokes report through `onEdit` (the view model debounces the
 /// rename); leaving the field fires `onCommit`; Enter, ↓, or Tab move to the
 /// body via `onExit`.
-final class InlineTitleHeader: NSView, NSTextFieldDelegate {
+final class InlineTitleHeader: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     let field = NSTextField()
-    private let warning = NSTextField(labelWithString: "")
+    private let warning = NSTextField(wrappingLabelWithString: "")
     var onEdit: ((String) -> Void)?
     var onCommit: (() -> Void)?
     var onExit: (() -> Void)?
     var wantsInitialFocus = false
+
+    // Properties row: the note's unmanaged frontmatter (Obsidian tags,
+    // aliases, …). Collapsed it's one faded line of keys; expanded it's a
+    // raw YAML editor. Hidden when the note has none.
+    let propertiesToggle = NSButton()
+    let propertiesEditor = NSTextView()
+    private let propertiesWarning = NSTextField(wrappingLabelWithString: "")
+    private(set) var propertiesExpanded = false
+    var onPropertiesEdit: ((String) -> Void)?
+    var onPropertiesCommit: (() -> Void)?
+    /// The header's height changed; the text view must re-reserve room.
+    var onHeightChange: (() -> Void)?
 
     /// Aligns the title's first glyph with the body text: text container
     /// inset plus the line fragment padding, minus the field cell's own inset.
     private static let leading = MarkdownTextView.bodyInset.width + 5 - 2
     private static let top: CGFloat = 16
     private static let gap: CGFloat = 4
+    private static let editorInset = NSSize(width: 6, height: 6)
 
     override var isFlipped: Bool { true }
 
@@ -558,17 +587,65 @@ final class InlineTitleHeader: NSView, NSTextFieldDelegate {
         field.delegate = self
         addSubview(field)
 
-        warning.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        warning.textColor = .systemOrange
-        warning.isHidden = true
-        addSubview(warning)
+        for label in [warning, propertiesWarning] {
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            label.textColor = .systemOrange
+            label.isHidden = true
+            addSubview(label)
+        }
+
+        propertiesToggle.isBordered = false
+        propertiesToggle.imagePosition = .imageLeading
+        propertiesToggle.alignment = .left
+        propertiesToggle.target = self
+        propertiesToggle.action = #selector(toggleProperties)
+        propertiesToggle.isHidden = true
+        addSubview(propertiesToggle)
+
+        propertiesEditor.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        propertiesEditor.textColor = .secondaryLabelColor
+        propertiesEditor.isRichText = false
+        propertiesEditor.allowsUndo = true
+        propertiesEditor.isAutomaticQuoteSubstitutionEnabled = false
+        propertiesEditor.isAutomaticDashSubstitutionEnabled = false
+        propertiesEditor.isAutomaticTextReplacementEnabled = false
+        propertiesEditor.isAutomaticSpellingCorrectionEnabled = false
+        propertiesEditor.textContainerInset = Self.editorInset
+        propertiesEditor.textContainer?.widthTracksTextView = true
+        propertiesEditor.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.08)
+        propertiesEditor.wantsLayer = true
+        propertiesEditor.layer?.cornerRadius = 6
+        propertiesEditor.delegate = self
+        propertiesEditor.isHidden = true
+        propertiesEditor.setAccessibilityLabel("Properties")
+        addSubview(propertiesEditor)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    private var contentWidth: CGFloat { max(200, bounds.width - Self.leading * 2) }
+
+    private func height(of label: NSTextField) -> CGFloat {
+        label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: contentWidth, height: .greatestFiniteMagnitude)).height ?? 0
+    }
+
+    private var editorHeight: CGFloat {
+        guard let layoutManager = propertiesEditor.layoutManager,
+              let container = propertiesEditor.textContainer else { return 0 }
+        container.containerSize = NSSize(width: contentWidth - Self.editorInset.width * 2,
+                                         height: .greatestFiniteMagnitude)
+        layoutManager.ensureLayout(for: container)
+        let used = max(layoutManager.usedRect(for: container).height,
+                       propertiesEditor.font?.boundingRectForFont.height ?? 14)
+        return ceil(used) + Self.editorInset.height * 2
+    }
+
     var preferredHeight: CGFloat {
         var height = Self.top + field.intrinsicContentSize.height
-        if !warning.isHidden { height += Self.gap + warning.intrinsicContentSize.height }
+        if !warning.isHidden { height += Self.gap + self.height(of: warning) }
+        if !propertiesToggle.isHidden { height += Self.gap + propertiesToggle.intrinsicContentSize.height }
+        if !propertiesEditor.isHidden { height += Self.gap + editorHeight }
+        if !propertiesWarning.isHidden { height += Self.gap + self.height(of: propertiesWarning) }
         return height
     }
 
@@ -578,14 +655,97 @@ final class InlineTitleHeader: NSView, NSTextFieldDelegate {
         needsLayout = true
     }
 
+    /// Updates the Properties row. The editor's text is never replaced while
+    /// the user is typing in it.
+    func setProperties(_ text: String, warning message: String?) {
+        let editing = window?.firstResponder === propertiesEditor
+        if !editing, propertiesEditor.string != text { propertiesEditor.string = text }
+        let current = editing ? propertiesEditor.string : text
+        // Hidden when there's nothing to show — unless open or being fixed.
+        let hasProperties = !current.isEmpty || propertiesExpanded || message != nil
+        propertiesToggle.isHidden = !hasProperties
+        propertiesEditor.isHidden = !(hasProperties && propertiesExpanded)
+        propertiesWarning.stringValue = message ?? ""
+        propertiesWarning.isHidden = message == nil
+        updateToggleTitle(keys: NoteDocument.propertyKeys(current.components(separatedBy: "\n")))
+        needsLayout = true
+    }
+
+    private func updateToggleTitle(keys: [String]) {
+        let symbol = propertiesExpanded ? "chevron.down" : "chevron.right"
+        propertiesToggle.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+        propertiesToggle.contentTintColor = .tertiaryLabelColor
+        let summary = propertiesExpanded || keys.isEmpty ? "Properties" : "Properties  ·  " + keys.joined(separator: " · ")
+        propertiesToggle.attributedTitle = NSAttributedString(string: " " + summary, attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ])
+        propertiesToggle.setAccessibilityLabel(propertiesExpanded ? "Hide properties" : "Show properties")
+    }
+
+    @objc func toggleProperties() {
+        propertiesExpanded.toggle()
+        if !propertiesExpanded, window?.firstResponder === propertiesEditor {
+            window?.makeFirstResponder(nil)  // commits via textDidEndEditing
+        }
+        setProperties(propertiesEditor.string, warning: propertiesWarning.isHidden ? nil : propertiesWarning.stringValue)
+        onHeightChange?()
+        if propertiesExpanded { window?.makeFirstResponder(propertiesEditor) }
+    }
+
     override func layout() {
         super.layout()
-        let width = max(0, bounds.width - Self.leading * 2)
+        let width = contentWidth
+        var y = Self.top
         let fieldHeight = field.intrinsicContentSize.height
-        field.frame = NSRect(x: Self.leading, y: Self.top, width: width, height: fieldHeight)
-        warning.frame = NSRect(
-            x: Self.leading + 2, y: Self.top + fieldHeight + Self.gap,
-            width: width, height: warning.intrinsicContentSize.height)
+        field.frame = NSRect(x: Self.leading, y: y, width: width, height: fieldHeight)
+        y += fieldHeight
+        if !warning.isHidden {
+            y += Self.gap
+            let h = height(of: warning)
+            warning.frame = NSRect(x: Self.leading + 2, y: y, width: width, height: h)
+            y += h
+        }
+        if !propertiesToggle.isHidden {
+            y += Self.gap
+            let size = propertiesToggle.intrinsicContentSize
+            propertiesToggle.frame = NSRect(x: Self.leading + 1, y: y, width: min(size.width, width), height: size.height)
+            y += size.height
+        }
+        if !propertiesEditor.isHidden {
+            y += Self.gap
+            let h = editorHeight
+            propertiesEditor.frame = NSRect(x: Self.leading + 2, y: y, width: width - 2, height: h)
+            y += h
+        }
+        if !propertiesWarning.isHidden {
+            y += Self.gap
+            propertiesWarning.frame = NSRect(x: Self.leading + 2, y: y, width: width,
+                                             height: height(of: propertiesWarning))
+        }
+    }
+
+    // MARK: Properties editor (NSTextViewDelegate)
+
+    func textDidChange(_ notification: Notification) {
+        guard notification.object as? NSTextView === propertiesEditor else { return }
+        onPropertiesEdit?(propertiesEditor.string)
+        updateToggleTitle(keys: NoteDocument.propertyKeys(propertiesEditor.string.components(separatedBy: "\n")))
+        needsLayout = true
+        onHeightChange?()
+    }
+
+    func textDidEndEditing(_ notification: Notification) {
+        guard notification.object as? NSTextView === propertiesEditor else { return }
+        onPropertiesCommit?()
+    }
+
+    /// YAML indents with spaces, so Tab inserts two.
+    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard textView === propertiesEditor, selector == #selector(NSResponder.insertTab(_:)) else { return false }
+        textView.insertText("  ", replacementRange: textView.selectedRange())
+        return true
     }
 
     override func viewDidMoveToWindow() {
