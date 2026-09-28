@@ -11,6 +11,9 @@ extension NSAttributedString.Key {
     static let livePreviewQuote = NSAttributedString.Key("SeanboyLivePreviewQuote")
     static let livePreviewCodeBlock = NSAttributedString.Key("SeanboyLivePreviewCodeBlock")
     static let livePreviewRule = NSAttributedString.Key("SeanboyLivePreviewRule")
+    /// The `[ ]`/`[x]` box character of a rendered task (value: checked).
+    /// Drawn as a space widened by kern, with a checkbox painted over it.
+    static let livePreviewCheckbox = NSAttributedString.Key("SeanboyLivePreviewCheckbox")
 }
 
 /// Turns `MarkdownSpans` into text attributes, Obsidian Live Preview style:
@@ -145,7 +148,23 @@ enum MarkdownStyler {
         case .orderedItem:
             tint(span.markers, in: storage)
         case .task:
-            tint(span.markers, in: storage)
+            // Rendered: the whole `- [ ] ` marker collapses to one checkbox.
+            if revealed {
+                tint(span.markers, in: storage)
+            } else if let marker = span.markers.first {
+                let text = storage.mutableString.substring(with: marker) as NSString
+                let bracket = text.range(of: "[")
+                if bracket.location != NSNotFound {
+                    let box = NSRange(location: marker.location + bracket.location + 1, length: 1)
+                    // Hide `- [` and `]`; the trailing space stays as the gap.
+                    hide([NSRange(location: marker.location, length: box.location - marker.location),
+                          NSRange(location: NSMaxRange(box), length: 1)], in: storage)
+                    storage.addAttributes([
+                        .livePreviewCheckbox: span.checked,
+                        .kern: MarkdownTextView.checkboxSize + 2,
+                    ], range: box)
+                }
+            }
             if span.checked {
                 storage.addAttributes([
                     .strikethroughStyle: NSUnderlineStyle.single.rawValue,
@@ -186,8 +205,8 @@ enum MarkdownStyler {
 }
 
 /// Layout-manager delegate that renders Live Preview without touching the
-/// text: hidden markers become null glyphs (no width, no drawing) and bullet
-/// markers become `•`.
+/// text: hidden markers become null glyphs (no width, no drawing), bullet
+/// markers become `•`, and task boxes become a space the checkbox is drawn on.
 final class LivePreviewLayout: NSObject, NSLayoutManagerDelegate {
     func layoutManager(_ layoutManager: NSLayoutManager,
                        shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
@@ -208,7 +227,11 @@ final class LivePreviewLayout: NSObject, NSLayoutManagerDelegate {
         storage.enumerateAttribute(.livePreviewBullet, in: span) { value, range, _ in
             if value != nil { bullets.insert(integersIn: range.location..<NSMaxRange(range)) }
         }
-        guard !hidden.isEmpty || !bullets.isEmpty else { return 0 }
+        var boxes = IndexSet()
+        storage.enumerateAttribute(.livePreviewCheckbox, in: span) { value, range, _ in
+            if value != nil { boxes.insert(integersIn: range.location..<NSMaxRange(range)) }
+        }
+        guard !hidden.isEmpty || !bullets.isEmpty || !boxes.isEmpty else { return 0 }
 
         // Glyphs arrive one font run at a time, so `font` is the bullet's font.
         var newGlyphs = Array(UnsafeBufferPointer(start: glyphs, count: count))
@@ -218,7 +241,9 @@ final class LivePreviewLayout: NSObject, NSLayoutManagerDelegate {
             if hidden.contains(index) {
                 newProperties[i] = .null
             } else if bullets.contains(index) {
-                newGlyphs[i] = Self.bulletGlyph(for: font)
+                newGlyphs[i] = Self.glyph(0x2022, in: font)  // •
+            } else if boxes.contains(index) {
+                newGlyphs[i] = Self.glyph(0x20, in: font)  // space; the box is drawn over it
             }
         }
         layoutManager.setGlyphs(newGlyphs, properties: newProperties,
@@ -227,8 +252,8 @@ final class LivePreviewLayout: NSObject, NSLayoutManagerDelegate {
         return count
     }
 
-    private static func bulletGlyph(for font: NSFont) -> CGGlyph {
-        var character: UniChar = 0x2022  // •
+    private static func glyph(_ character: UniChar, in font: NSFont) -> CGGlyph {
+        var character = character
         var glyph: CGGlyph = 0
         CTFontGetGlyphsForCharacters(font as CTFont, &character, &glyph, 1)
         return glyph

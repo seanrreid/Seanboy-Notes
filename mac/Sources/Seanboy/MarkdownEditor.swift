@@ -287,6 +287,17 @@ final class MarkdownTextView: NSTextView {
                 NSRect(x: origin.x + 5, y: line.minY + 2, width: 3, height: line.height - 4).fill()
             }
         }
+        storage.enumerateAttribute(.livePreviewCheckbox, in: characters) { value, range, _ in
+            guard let checked = value as? Bool, let rect = checkboxRect(forCharacterAt: range.location)
+            else { return }
+            let configuration = NSImage.SymbolConfiguration(pointSize: Self.checkboxSize, weight: .regular)
+                .applying(.init(paletteColors: [checked ? .controlAccentColor : .secondaryLabelColor]))
+            let symbol = NSImage(systemSymbolName: checked ? "checkmark.square.fill" : "square",
+                                 accessibilityDescription: checked ? "Done" : "To do")?
+                .withSymbolConfiguration(configuration)
+            symbol?.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
+                         respectFlipped: true, hints: nil)
+        }
         storage.enumerateAttribute(.livePreviewRule, in: characters) { value, range, _ in
             guard value != nil else { return }
             NSColor.separatorColor.setFill()
@@ -365,6 +376,107 @@ final class MarkdownTextView: NSTextView {
         textView.textContainer?.containerSize = NSSize(
             width: 0, height: CGFloat.greatestFiniteMagnitude)
         return textView
+    }
+
+    // MARK: List editing (SeanboyCore.ListEditing)
+
+    /// Applies a list rule's edit as one undoable change. Nil means the rule
+    /// doesn't apply, and the caller falls back to the normal behavior.
+    private func perform(_ edit: ListEditing.Edit?) -> Bool {
+        guard let edit, !hasMarkedText() else { return false }
+        if edit.range.length > 0 || !edit.replacement.isEmpty {
+            guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return true }
+            replaceCharacters(in: edit.range, with: edit.replacement)
+            didChangeText()
+        }
+        setSelectedRange(edit.selection)
+        scrollRangeToVisible(edit.selection)
+        return true
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        if !perform(ListEditing.enter(string, selection: selectedRange())) { super.insertNewline(sender) }
+    }
+
+    override func insertTab(_ sender: Any?) {
+        if !perform(ListEditing.indent(string, selection: selectedRange(), outdent: false)) {
+            super.insertTab(sender)
+        }
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        if !perform(ListEditing.indent(string, selection: selectedRange(), outdent: true)) {
+            super.insertBacktab(sender)
+        }
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        if !perform(ListEditing.backspace(string, selection: selectedRange())) { super.deleteBackward(sender) }
+    }
+
+    override func moveToBeginningOfLine(_ sender: Any?) {
+        if !moveToListItemStart() { super.moveToBeginningOfLine(sender) }
+    }
+
+    override func moveToLeftEndOfLine(_ sender: Any?) {
+        if !moveToListItemStart() { super.moveToLeftEndOfLine(sender) }
+    }
+
+    /// Home/⌘← stops at the start of a list item's text first.
+    private func moveToListItemStart() -> Bool {
+        guard selectedRange().length == 0,
+              let target = ListEditing.lineStart(string, caret: selectedRange().location) else { return false }
+        setSelectedRange(NSRange(location: target, length: 0))
+        return true
+    }
+
+    // MARK: Checkboxes
+
+    static let checkboxSize: CGFloat = 14
+
+    /// Where the checkbox for the task marker at `index` is drawn.
+    func checkboxRect(forCharacterAt index: Int) -> NSRect? {
+        guard let layoutManager, let textContainer else { return nil }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: NSRange(location: index, length: 1),
+                                              actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        let glyphRect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        let line = layoutManager.lineFragmentUsedRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+        let size = Self.checkboxSize
+        let origin = textContainerOrigin
+        return NSRect(x: glyphRect.minX + origin.x + 1,
+                      y: line.midY + origin.y - size / 2,
+                      width: size, height: size)
+    }
+
+    /// Clicking a rendered checkbox toggles it without moving the cursor.
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let index = checkboxIndex(at: point) {
+            let selection = selectedRange()
+            if perform(ListEditing.toggleTask(string, at: index)) {
+                setSelectedRange(selection)
+                return
+            }
+        }
+        super.mouseDown(with: event)
+    }
+
+    private func checkboxIndex(at point: NSPoint) -> Int? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return nil }
+        let origin = textContainerOrigin
+        let index = layoutManager.characterIndex(
+            for: NSPoint(x: point.x - origin.x, y: point.y - origin.y),
+            in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
+        let line = (string as NSString).lineRange(for: NSRange(location: min(index, storage.length), length: 0))
+        var hit: Int?
+        storage.enumerateAttribute(.livePreviewCheckbox, in: line) { value, range, stop in
+            guard value != nil, let rect = checkboxRect(forCharacterAt: range.location),
+                  rect.insetBy(dx: -4, dy: -4).contains(point) else { return }
+            hit = range.location
+            stop.pointee = true
+        }
+        return hit
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

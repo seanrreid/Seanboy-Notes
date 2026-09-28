@@ -207,6 +207,84 @@ final class MarkdownEditorTests: XCTestCase {
         XCTAssertNotEqual(layoutManager.cgGlyph(at: 0), dashGlyph)
     }
 
+    // MARK: Lists and checkboxes
+
+    func testEnterContinuesAndEndsLists() {
+        makeEditor("- milk")
+        focus(at: 6)
+        textView.insertNewline(nil)
+        XCTAssertEqual(text, "- milk\n- ")
+        textView.insertNewline(nil)  // empty item ends the list
+        XCTAssertEqual(text, "- milk\n")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 7, length: 0))
+    }
+
+    func testTabIndentsAndUndoRestores() throws {
+        makeEditor("- a\n- b")
+        focus(at: 7)
+        let undo = try XCTUnwrap(textView.undoManager)
+        undo.groupsByEvent = false  // no event loop in tests
+        func step(_ action: () -> Void) {
+            undo.beginUndoGrouping(); action(); undo.endUndoGrouping()
+        }
+        step { textView.insertTab(nil) }
+        XCTAssertEqual(text, "- a\n\t- b")
+        step { textView.insertBacktab(nil) }
+        XCTAssertEqual(text, "- a\n- b")
+        step { textView.insertTab(nil) }
+        undo.undo()
+        XCTAssertEqual(textView.string, "- a\n- b", "list edits are undoable")
+    }
+
+    func testTabOutsideListInsertsTab() {
+        makeEditor("plain")
+        focus(at: 5)
+        textView.insertTab(nil)
+        XCTAssertEqual(text, "plain\t")
+    }
+
+    func testBackspaceAfterMarkerRemovesIt() {
+        makeEditor("- text")
+        focus(at: 2)
+        textView.deleteBackward(nil)
+        XCTAssertEqual(text, "text")
+    }
+
+    func testHomeStopsAtItemText() {
+        makeEditor("- some text")
+        focus(at: 8)
+        textView.moveToBeginningOfLine(nil)
+        XCTAssertEqual(textView.selectedRange().location, 2)
+        textView.moveToBeginningOfLine(nil)
+        XCTAssertEqual(textView.selectedRange().location, 0)
+    }
+
+    func testRenderedTaskCollapsesToCheckboxAndClickToggles() {
+        makeEditor("- [ ] buy milk\nother")
+        focus(at: 17)  // cursor on "other", so the task line renders
+        let storage = textView.textStorage!
+        XCTAssertTrue(isHidden(0) && isHidden(1) && isHidden(2) && isHidden(4), "- [ and ] hidden")
+        XCTAssertEqual(storage.attribute(.livePreviewCheckbox, at: 3, effectiveRange: nil) as? Bool, false)
+        XCTAssertFalse(isHidden(5), "gap before the text stays")
+
+        let rect = try! XCTUnwrap(textView.checkboxRect(forCharacterAt: 3))
+        let click = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: textView.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil),
+            modifierFlags: [], timestamp: 0, windowNumber: window!.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 1, pressure: 1)!
+        textView.mouseDown(with: click)
+        XCTAssertEqual(text, "- [x] buy milk\nother")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 17, length: 0), "click doesn't move the cursor")
+        XCTAssertEqual(storage.attribute(.livePreviewCheckbox, at: 3, effectiveRange: nil) as? Bool, true)
+    }
+
+    func testTaskOnCursorLineShowsRawMarker() {
+        makeEditor("- [ ] buy milk")
+        focus(at: 8)
+        XCTAssertFalse(isHidden(0))
+        XCTAssertNil(textView.textStorage!.attribute(.livePreviewCheckbox, at: 3, effectiveRange: nil))
+    }
+
     func testBoldInsideHeadingKeepsHeadingSize() {
         makeEditor("# A **b**")
         XCTAssertTrue(isBold(6))
