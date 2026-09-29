@@ -9,8 +9,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material.icons.filled.Delete
@@ -73,6 +71,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -89,6 +88,8 @@ import androidx.compose.ui.unit.dp
 import com.torchcodelab.seanboy.core.FolderListing
 import com.torchcodelab.seanboy.core.Note
 import com.torchcodelab.seanboy.core.WikiLinkParser
+import com.torchcodelab.seanboy.ui.editor.LivePreviewEditText
+import com.torchcodelab.seanboy.ui.editor.LivePreviewEditor
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -387,15 +388,15 @@ private fun NoteCard(note: Note, showFolder: Boolean, onClick: () -> Unit) {
 private fun EditorScreen(vm: NotesViewModel, note: Note) {
     // Local edit state keyed to the note so switching notes resets the fields.
     var title by remember(note.id) { mutableStateOf(vm.displayedTitle(note)) }
-    var body by remember(note.id) { mutableStateOf(TextFieldValue(note.body)) }
+    var body by remember(note.id) { mutableStateOf(note.body) }
+    var bodyEditor by remember(note.id) { mutableStateOf<LivePreviewEditText?>(null) }
     var confirmDelete by remember(note.id) { mutableStateOf(false) }
-    val links = remember(body.text) { WikiLinkParser.linkedTitles(body.text) }
-    val backlinks = remember(note.id, body.text) { vm.backlinks(note) }
+    val links = remember(body) { WikiLinkParser.linkedTitles(body) }
+    val backlinks = remember(note.id, body) { vm.backlinks(note) }
     val clash by vm.titleClash.collectAsState()
     val titleWarning = clash?.takeIf { it.noteId == note.id }
         ?.let { "A note named “${it.existingTitle}” already exists in this folder." }
     val titleFocus = remember { FocusRequester() }
-    val bodyFocus = remember { FocusRequester() }
     var titleFocused by remember { mutableStateOf(false) }
     // A new note opens with the cursor in its empty title.
     LaunchedEffect(note.id) {
@@ -454,8 +455,7 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 keyboardActions = KeyboardActions(onNext = {
                     vm.flushPendingTitle()
-                    body = body.copy(selection = TextRange(0))
-                    bodyFocus.requestFocus()
+                    bodyEditor?.focusAtStart()
                 }),
                 modifier = Modifier.fillMaxWidth().focusRequester(titleFocus).onFocusChanged {
                     if (titleFocused && !it.isFocused) vm.flushPendingTitle()
@@ -468,17 +468,16 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
-            TextField(
-                value = body,
-                onValueChange = {
-                    if (it.text != body.text) vm.updateBody(note.id, it.text)
-                    body = it
-                },
-                placeholder = { Text("Start writing…") },
-                textStyle = MaterialTheme.typography.bodyLarge,
-                colors = borderlessFieldColors(),
-                modifier = Modifier.fillMaxWidth().weight(1f).focusRequester(bodyFocus),
-            )
+            // Live Preview: Markdown styled in place, markers shown only on the cursor lines.
+            key(note.id) {
+                LivePreviewEditor(
+                    initialMarkdown = note.body,
+                    onChange = { body = it; vm.updateBody(note.id, it) },
+                    onOpenWikiLink = vm::openWikiLink,
+                    onReady = { bodyEditor = it },
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                )
+            }
             if (links.isNotEmpty() || backlinks.isNotEmpty()) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainer,

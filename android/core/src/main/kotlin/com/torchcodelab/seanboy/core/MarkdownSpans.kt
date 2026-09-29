@@ -149,7 +149,7 @@ object MarkdownSpans {
 
     private fun terminatorLength(text: String, i: Int): Int = when (text[i]) {
         '\r' -> if (i + 1 < text.length && text[i + 1] == '\n') 2 else 1
-        '\n', '\u0085', ' ', ' ' -> 1
+        '\n', '\u0085', '\u2028', '\u2029' -> 1
         else -> 0
     }
 
@@ -172,7 +172,7 @@ object MarkdownSpans {
     }
 
     /** The whole lines (terminators included) touching [range], like `NSString.lineRange(for:)`. */
-    internal fun lineRange(text: String, range: SpanRange): SpanRange {
+    fun lineRange(text: String, range: SpanRange): SpanRange {
         var start = range.location
         while (start > 0) {
             val c = text[start - 1]
@@ -215,7 +215,7 @@ object MarkdownSpans {
     // MARK: - Unicode classes (ICU's \w and \s, spelled out for the JVM)
 
     private const val WORD = """\p{L}\p{M}\p{Nd}\p{Pc}"""
-    private const val SPACE = """\s\u0085   -     　"""
+    private const val SPACE = """\s\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000"""
 
     // MARK: - Code fences
 
