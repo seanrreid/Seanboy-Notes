@@ -3,6 +3,7 @@ package com.torchcodelab.seanboy.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.torchcodelab.seanboy.core.FolderListing
 import com.torchcodelab.seanboy.core.Note
 import com.torchcodelab.seanboy.core.S3Config
 import com.torchcodelab.seanboy.core.SearchService
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,6 +42,9 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
+    /** Folder being browsed when the search is empty; "" is the root. */
+    private val _folder = MutableStateFlow("")
+
     private val _selectedId = MutableStateFlow<UUID?>(null)
     val selectedId: StateFlow<UUID?> = _selectedId.asStateFlow()
 
@@ -52,6 +57,20 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     val results: StateFlow<List<Note>> =
         combine(_notes, _query) { notes, q -> SearchService.search(q, notes) }
             .stateIn(viewModelScope, SharingStarted.Eagerly, store.activeNotes)
+
+    /**
+     * The browsed folder's contents. If the folder disappears (its last note
+     * deleted or synced away), this falls back to its nearest ancestor.
+     */
+    val listing: StateFlow<FolderListing> =
+        combine(_notes, _folder) { notes, folder ->
+            FolderListing.of(notes, FolderListing.nearestExisting(notes, folder))
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, FolderListing.of(store.activeNotes, ""))
+
+    /** Every folder, depth-first, for the side drawer. */
+    val folderTree: StateFlow<List<FolderListing.Subfolder>> =
+        _notes.map { FolderListing.tree(it) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, FolderListing.tree(store.activeNotes))
 
     val selectedNote: StateFlow<Note?> =
         combine(_notes, _selectedId) { _, id -> id?.let { store.note(it) } }
@@ -67,8 +86,19 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun select(id: UUID?) { _selectedId.value = id }
 
+    fun openFolder(path: String) { _folder.value = path }
+
+    /** Back from a folder to its parent. False at the root (nothing to do). */
+    fun goUp(): Boolean {
+        val current = listing.value.folder
+        if (current.isEmpty()) return false
+        _folder.value = FolderListing.parent(current)
+        return true
+    }
+
+    /** New notes land in the folder being browsed. */
     fun createNote() {
-        val note = store.create(title = "New Note")
+        val note = store.create(title = "New Note", folder = listing.value.folder)
         _selectedId.value = note.id
         maybeSync()
     }

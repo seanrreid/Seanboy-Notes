@@ -1,6 +1,33 @@
 package com.torchcodelab.seanboy.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
+import android.text.format.DateUtils
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
+import com.torchcodelab.seanboy.core.NotePreview
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,20 +41,35 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,8 +77,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.torchcodelab.seanboy.core.FolderListing
 import com.torchcodelab.seanboy.core.Note
 import com.torchcodelab.seanboy.core.WikiLinkParser
+import kotlinx.coroutines.launch
+import java.util.UUID
 
 @Composable
 fun SeanboyApp(vm: NotesViewModel) {
@@ -54,45 +99,83 @@ fun SeanboyApp(vm: NotesViewModel) {
 @Composable
 private fun NotesListScreen(vm: NotesViewModel, onOpenSettings: () -> Unit) {
     val results by vm.results.collectAsState()
+    val listing by vm.listing.collectAsState()
     val query by vm.query.collectAsState()
     val sync by vm.sync.collectAsState()
+    val searching = query.isNotBlank()
+    val inFolder = !searching && listing.folder.isNotEmpty()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Seanboy") },
-                actions = {
-                    TextButton(onClick = vm::syncNow) { Text("Sync") }
-                    TextButton(onClick = onOpenSettings) { Text("Settings") }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    // Back: clear a search first, then climb out of folders, then leave.
+    BackHandler(enabled = searching || inFolder) {
+        if (searching) vm.setQuery("") else vm.goUp()
+    }
+    // Registered last so it wins: an open drawer closes before anything else.
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            FolderDrawer(
+                vm,
+                current = if (searching) null else listing.folder,
+                onPick = { path ->
+                    vm.setQuery("")
+                    vm.openFolder(path)
+                    scope.launch { drawerState.close() }
                 },
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = vm::createNote) { Text("＋", style = MaterialTheme.typography.headlineSmall) }
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = vm::setQuery,
-                placeholder = { Text("Search notes…") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            SyncStatusLine(sync)
-            HorizontalDivider()
-            if (results.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        if (query.isBlank()) "No notes yet — tap ＋ to start" else "No matches",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(results, key = { it.id }) { note ->
-                        NoteRow(note) { vm.select(note.id) }
-                        HorizontalDivider()
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(if (inFolder) listing.folder.substringAfterLast('/') else "Seanboy") },
+                    navigationIcon = {
+                        Row {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Filled.Menu, contentDescription = "Folders")
+                            }
+                            if (inFolder) {
+                                IconButton(onClick = { vm.goUp() }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up one folder")
+                                }
+                            }
+                        }
+                    },
+                    actions = {
+                        SyncButton(sync, onClick = vm::syncNow)
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                        }
+                    },
+                )
+            },
+            floatingActionButton = {
+                FloatingActionButton(onClick = vm::createNote) { Text("＋", style = MaterialTheme.typography.headlineSmall) }
+            },
+        ) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                SearchField(query, onChange = vm::setQuery)
+                // Routine states show on the sync button; only problems get a line.
+                if (sync is SyncStatus.Failed || sync is SyncStatus.NotConfigured) SyncStatusLine(sync)
+                if (inFolder) Breadcrumbs(listing.folder, onOpen = vm::openFolder)
+                // Folders live only in the drawer. The main list is search results
+                // (flat and global — the Tomboy soul), a folder's own notes, or,
+                // at home, the most recently edited notes from anywhere.
+                when {
+                    searching -> NoteList(results, showFolder = true, empty = "No matches", onOpen = vm::select)
+                    inFolder -> NoteList(listing.notes, showFolder = false, empty = "No notes directly in this folder", onOpen = vm::select)
+                    else -> {
+                        Text(
+                            "Recent",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        NoteList(results.take(RECENT_COUNT), showFolder = true, empty = "No notes yet — tap ＋ to start", onOpen = vm::select)
                     }
                 }
             }
@@ -100,22 +183,192 @@ private fun NotesListScreen(vm: NotesViewModel, onOpenSettings: () -> Unit) {
     }
 }
 
+/**
+ * The side drawer: the whole folder tree, like the Mac sidebar. Folders with
+ * subfolders expand and collapse; the path to the current folder starts open.
+ * [current] is null while searching, since search spans every folder.
+ */
 @Composable
-private fun NoteRow(note: Note, onClick: () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        Text(note.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        val snippet = note.body.trim().replace("\n", " ")
-        if (snippet.isNotEmpty()) {
-            Text(
-                snippet.take(100),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+private fun FolderDrawer(vm: NotesViewModel, current: String?, onPick: (String) -> Unit) {
+    val tree by vm.folderTree.collectAsState()
+    var expanded by remember { mutableStateOf(setOf<String>()) }
+    LaunchedEffect(current) {
+        var folder = current.orEmpty()
+        while (folder.isNotEmpty()) {
+            folder = FolderListing.parent(folder)
+            if (folder.isNotEmpty()) expanded = expanded + folder
         }
-        if (note.folder.isNotEmpty()) {
-            Text(note.folder, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+    }
+
+    ModalDrawerSheet {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp)) {
+            Text(
+                "Folders",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp),
+            )
+            NavigationDrawerItem(
+                label = { Text("Seanboy") },
+                selected = current == "",
+                onClick = { onPick("") },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+            tree.forEachIndexed { index, folder ->
+                val visible = generateSequence(FolderListing.parent(folder.path)) { p ->
+                    if (p.isEmpty()) null else FolderListing.parent(p)
+                }.all { it.isEmpty() || it in expanded }
+                if (!visible) return@forEachIndexed
+                val hasChildren = tree.getOrNull(index + 1)?.path?.startsWith(folder.path + "/") == true
+                val isOpen = folder.path in expanded
+                NavigationDrawerItem(
+                    label = { Text(folder.name, maxLines = 1) },
+                    selected = current == folder.path,
+                    onClick = { onPick(folder.path) },
+                    badge = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(folder.noteCount.toString(), style = MaterialTheme.typography.labelMedium)
+                            if (hasChildren) {
+                                IconButton(onClick = {
+                                    expanded = if (isOpen) expanded - folder.path else expanded + folder.path
+                                }) {
+                                    Icon(
+                                        if (isOpen) Icons.Filled.KeyboardArrowDown
+                                        else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = if (isOpen) "Collapse ${folder.name}" else "Expand ${folder.name}",
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .padding(NavigationDrawerItemDefaults.ItemPadding)
+                        .padding(start = (16 * FolderListing.depth(folder.path)).dp),
+                )
+            }
+        }
+    }
+}
+
+/** How many notes the home screen shows. */
+private const val RECENT_COUNT = 5
+
+@Composable
+private fun NoteList(notes: List<Note>, showFolder: Boolean, empty: String, onOpen: (UUID) -> Unit) {
+    if (notes.isEmpty()) {
+        EmptyMessage(empty)
+        return
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        // Bottom padding keeps the last card clear of the ＋ button.
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(notes, key = { it.id }) { note ->
+            NoteCard(note, showFolder) { onOpen(note.id) }
+        }
+    }
+}
+
+/** Filled, rounded search field — no outline box. */
+@Composable
+private fun SearchField(query: String, onChange: (String) -> Unit) {
+    TextField(
+        value = query,
+        onValueChange = onChange,
+        placeholder = { Text("Search all notes") },
+        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onChange("") }) { Icon(Icons.Filled.Close, contentDescription = "Clear search") }
+            }
+        },
+        singleLine = true,
+        shape = CircleShape,
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+/** Sync icon that turns into a spinner while a sync runs. */
+@Composable
+private fun SyncButton(status: SyncStatus, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = status !is SyncStatus.Syncing) {
+        if (status is SyncStatus.Syncing) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Filled.Refresh, contentDescription = "Sync now")
+        }
+    }
+}
+
+@Composable
+private fun EmptyMessage(text: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** "Seanboy › Journal › 2026" — every segment but the current one is tappable. */
+@Composable
+private fun Breadcrumbs(folder: String, onOpen: (String) -> Unit) {
+    val crumbs = FolderListing.breadcrumbs(folder, rootName = "Seanboy")
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        crumbs.forEachIndexed { index, crumb ->
+            val isCurrent = index == crumbs.lastIndex
+            if (index > 0) {
+                Text("›", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (isCurrent) {
+                Text(
+                    crumb.name,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+                )
+            } else {
+                TextButton(onClick = { onOpen(crumb.path) }) { Text(crumb.name) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoteCard(note: Note, showFolder: Boolean, onClick: () -> Unit) {
+    val preview = remember(note.body) { NotePreview.of(note.body) }
+    val edited = editedLabel(note)
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(note.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                 overflow = TextOverflow.Ellipsis)
+            if (preview.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(preview, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                     maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (showFolder && note.folder.isNotEmpty()) {
+                    Text(note.folder, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Text("  ·  ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(edited, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -126,53 +379,114 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
     // Local edit state keyed to the note so switching notes resets the fields.
     var title by remember(note.id) { mutableStateOf(note.title) }
     var body by remember(note.id) { mutableStateOf(note.body) }
+    var confirmDelete by remember(note.id) { mutableStateOf(false) }
     val links = remember(body) { WikiLinkParser.linkedTitles(body) }
     val backlinks = remember(note.id, body) { vm.backlinks(note) }
+    BackHandler { vm.select(null) }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete “${note.title}”?") },
+            text = { Text("It's removed from this device and, on the next sync, from your other devices.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; vm.delete(note.id) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Edit") },
-                navigationIcon = { TextButton(onClick = { vm.select(null) }) { Text("Back") } },
-                actions = { TextButton(onClick = { vm.delete(note.id) }) { Text("Delete") } },
+                title = {},
+                navigationIcon = {
+                    IconButton(onClick = { vm.select(null) }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to notes")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { confirmDelete = true }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Delete note")
+                    }
+                },
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            OutlinedTextField(
+        Column(
+            Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
+                .padding(horizontal = 4.dp),
+        ) {
+            // Title and body are borderless, like the Mac editor: the page is the field.
+            TextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Title") },
+                placeholder = { Text("Title", style = MaterialTheme.typography.headlineSmall) },
+                textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
                 singleLine = true,
+                colors = borderlessFieldColors(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (title.isNotBlank()) vm.rename(note.id, title) }),
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
+            Text(
+                listOfNotNull(note.folder.ifEmpty { null }, editedLabel(note)).joinToString("  ·  "),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            TextField(
                 value = body,
                 onValueChange = { body = it; vm.updateBody(note.id, it) },
-                label = { Text("Markdown") },
+                placeholder = { Text("Start writing…") },
+                textStyle = MaterialTheme.typography.bodyLarge,
+                colors = borderlessFieldColors(),
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
-            if (links.isNotEmpty()) {
-                LinkRow("Links", links, onClick = vm::openWikiLink)
-            }
-            if (backlinks.isNotEmpty()) {
-                LinkRow("Backlinks", backlinks.map { it.title }, onClick = vm::openWikiLink)
+            if (links.isNotEmpty() || backlinks.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                ) {
+                    Column(Modifier.padding(vertical = 8.dp)) {
+                        if (links.isNotEmpty()) LinkRow("Links", links, onClick = vm::openWikiLink)
+                        if (backlinks.isNotEmpty()) {
+                            LinkRow("Backlinks", backlinks.map { it.title }, onClick = vm::openWikiLink)
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
+private fun borderlessFieldColors() = TextFieldDefaults.colors(
+    focusedContainerColor = Color.Transparent,
+    unfocusedContainerColor = Color.Transparent,
+    focusedIndicatorColor = Color.Transparent,
+    unfocusedIndicatorColor = Color.Transparent,
+)
+
+/** "3 minutes ago", "Yesterday", "Sep 12" — when the note was last edited. */
+private fun editedLabel(note: Note): String =
+    DateUtils.getRelativeTimeSpanString(
+        note.modifiedAt.toEpochMilli(), System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS,
+    ).toString()
+
+@Composable
 private fun LinkRow(label: String, titles: List<String>, onClick: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            titles.distinct().take(12).forEach { t ->
-                TextButton(onClick = { onClick(t) }) { Text("[[${t}]]") }
-            }
+        titles.distinct().take(12).forEach { t ->
+            SuggestionChip(onClick = { onClick(t) }, label = { Text(t) })
         }
     }
 }
@@ -187,6 +501,7 @@ private fun SettingsScreen(vm: NotesViewModel, onBack: () -> Unit) {
     var accessKey by rememberSaveable { mutableStateOf(existing?.accessKeyID ?: "") }
     var secret by rememberSaveable { mutableStateOf(existing?.secretAccessKey ?: "") }
     val sync by vm.sync.collectAsState()
+    BackHandler(onBack = onBack)
 
     Scaffold(
         topBar = {
