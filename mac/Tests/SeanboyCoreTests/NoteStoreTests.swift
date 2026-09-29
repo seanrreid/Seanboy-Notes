@@ -111,6 +111,64 @@ final class NoteDocumentTests: XCTestCase {
         XCTAssertFalse(NoteDocument.serialize(note).contains("title:"))
     }
 
+    // MARK: Properties editing
+
+    private func note(_ extras: [String]) -> Note {
+        var note = Note(title: "Daily", body: "body")
+        note.extraFrontmatter = extras
+        return note
+    }
+
+    private func obsidianNote() -> Note {
+        note(["tags:", "  - journal", "aliases: [JRN]", "", "cssclass: wide"])
+    }
+
+    func testPropertiesUnchangedTextIsByteFaithful() {
+        let note = note(["tags: x", "", ""])
+        let text = NoteDocument.propertiesText(for: note)
+        XCTAssertEqual(NoteDocument.editedFrontmatter(text, for: note), .accepted(["tags: x", "", ""]),
+                       "trailing blank lines from the file survive when nothing was edited")
+    }
+
+    func testPropertiesEditAcceptsNormalYAML() {
+        let note = obsidianNote()
+        let edited = "tags:\n  - journal\n  - ideas\naliases: [JRN]\nstatus: draft\n\n"
+        XCTAssertEqual(NoteDocument.editedFrontmatter(edited, for: note),
+                       .accepted(["tags:", "  - journal", "  - ideas", "aliases: [JRN]", "status: draft"]))
+    }
+
+    func testPropertiesEditCanClearEverything() {
+        XCTAssertEqual(NoteDocument.editedFrontmatter("", for: obsidianNote()), .accepted([]))
+    }
+
+    func testPropertiesEditRejectsBlockTerminator() {
+        let result = NoteDocument.editedFrontmatter("tags: x\n---\nmore: y", for: obsidianNote())
+        guard case .rejected(let lines) = result else { return XCTFail("expected rejection") }
+        XCTAssertTrue(lines.contains("---"))
+    }
+
+    func testPropertiesEditRejectsManagedKeys() {
+        let note = obsidianNote()
+        for line in ["created: 2026-01-01T00:00:00Z", "seanboy-id: \(UUID().uuidString)",
+                     "deleted: true", "title: Sneaky"] {
+            XCTAssertEqual(NoteDocument.editedFrontmatter("tags: x\n" + line, for: note),
+                           .rejected(lines: [line]), line)
+        }
+    }
+
+    func testPropertiesEditKeepsForeignValuesOfManagedNames() {
+        // Values Seanboy can't parse as its own stay the user's.
+        let note = obsidianNote()
+        XCTAssertEqual(NoteDocument.editedFrontmatter("created: last spring\nid: zettel-42", for: note),
+                       .accepted(["created: last spring", "id: zettel-42"]))
+    }
+
+    func testPropertyKeys() {
+        XCTAssertEqual(NoteDocument.propertyKeys(obsidianNote().extraFrontmatter),
+                       ["tags", "aliases", "cssclass"])
+        XCTAssertEqual(NoteDocument.propertyKeys(["# comment: no", "a: 1", "a: 2", "  b: nested"]), ["a"])
+    }
+
     func testGarbageIsJustBody() {
         let parsed = NoteDocument.parse("")
         XCTAssertNil(parsed.id)
@@ -226,6 +284,55 @@ final class NoteStoreTests: XCTestCase {
             atPath: directory.appendingPathComponent("Final.md").path))
         XCTAssertEqual(store.note(id: note.id)?.title, "Final")
         XCTAssertNil(store.note(atPath: "Draft.md"))
+    }
+
+    func testRenameMovesFile() throws {
+        let store = try makeStore()
+        let note = store.create(title: "Untitled", body: "text")
+        guard case .renamed(let renamed) = store.rename(id: note.id, to: "  Groceries ") else {
+            return XCTFail("expected rename")
+        }
+        XCTAssertEqual(renamed.title, "Groceries")
+        XCTAssertEqual(store.note(id: note.id)?.body, "text")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("Groceries.md").path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("Untitled.md").path))
+    }
+
+    func testRenameBlankOrSameIsUnchanged() throws {
+        let store = try makeStore()
+        let note = store.create(title: "Keep")
+        XCTAssertEqual(store.rename(id: note.id, to: "   "), .unchanged)
+        XCTAssertEqual(store.rename(id: note.id, to: "Keep"), .unchanged)
+        XCTAssertEqual(store.note(id: note.id)?.title, "Keep")
+    }
+
+    func testRenameOntoExistingNoteClashesAndLeavesBothIntact() throws {
+        let store = try makeStore()
+        let existing = store.create(title: "Ideas", body: "original")
+        let note = store.create(title: "Untitled", body: "new")
+        XCTAssertEqual(store.rename(id: note.id, to: "ideas"), .clash(existingTitle: "Ideas"))
+        XCTAssertEqual(store.note(id: note.id)?.title, "Untitled")
+        XCTAssertEqual(store.note(id: existing.id)?.body, "original")
+        let reloaded = try makeStore()
+        XCTAssertEqual(reloaded.note(id: existing.id)?.body, "original")
+        XCTAssertEqual(reloaded.note(id: note.id)?.body, "new")
+    }
+
+    func testRenameClashIsPerFolder() throws {
+        let store = try makeStore()
+        store.create(title: "Ideas", folder: "Projects")
+        let note = store.create(title: "Untitled")
+        guard case .renamed = store.rename(id: note.id, to: "Ideas") else {
+            return XCTFail("same name in another folder is allowed")
+        }
+    }
+
+    func testBlankCreateIsUntitled() throws {
+        let store = try makeStore()
+        XCTAssertEqual(store.create(title: "").title, "Untitled")
+        XCTAssertEqual(store.create(title: " ").title, "Untitled 2")
     }
 
     func testCaseOnlyRename() throws {

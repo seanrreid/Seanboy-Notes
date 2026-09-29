@@ -1,0 +1,39 @@
+{
+  "about": "List-editing fixtures shared by the Swift (SeanboyCore) and Kotlin (:core) ListEditing ports. `|` marks the caret; `«` and `»` mark a selection. `after: null` means the rule doesn't apply and the key does its normal thing. Actions: enter, tab, shiftTab, backspace, home, toggle.",
+  "cases": [
+    { "name": "enter continues a bullet", "action": "enter", "before": "- milk|", "after": "- milk\n- |" },
+    { "name": "enter keeps the bullet character and indent", "action": "enter", "before": "\t* eggs|", "after": "\t* eggs\n\t* |" },
+    { "name": "enter splits an item at the caret", "action": "enter", "before": "- ab|cd", "after": "- ab\n- |cd" },
+    { "name": "enter increments numbers", "action": "enter", "before": "9. nine|", "after": "9. nine\n10. |" },
+    { "name": "enter keeps the paren delimiter", "action": "enter", "before": "1) one|", "after": "1) one\n2) |" },
+    { "name": "enter after a done task starts an open task", "action": "enter", "before": "- [x] done|", "after": "- [x] done\n- [ ] |" },
+    { "name": "enter on an empty item ends the list", "action": "enter", "before": "- a\n- |", "after": "- a\n|" },
+    { "name": "enter on an empty task ends the list", "action": "enter", "before": "- [ ] |", "after": "|" },
+    { "name": "enter on an empty nested item outdents it", "action": "enter", "before": "- a\n\t- |", "after": "- a\n- |" },
+    { "name": "enter inside the marker is a plain newline", "action": "enter", "before": "|- a", "after": null },
+    { "name": "enter outside a list is a plain newline", "action": "enter", "before": "hello|", "after": null },
+    { "name": "enter in a code block is a plain newline", "action": "enter", "before": "```\n- a|\n```", "after": null },
+
+    { "name": "tab indents with the note's tab style", "action": "tab", "before": "- a\n- b|", "after": "- a\n\t- b|" },
+    { "name": "tab indents with the note's space style", "action": "tab", "before": "- a\n  - b\n- c|", "after": "- a\n  - b\n  - c|" },
+    { "name": "tab indents every selected item", "action": "tab", "before": "- «a\n- b»", "after": "\t- «a\n\t- b»" },
+    { "name": "tab outside a list inserts a tab", "action": "tab", "before": "text|", "after": null },
+    { "name": "shift-tab outdents", "action": "shiftTab", "before": "- a\n\t- b|", "after": "- a\n- b|" },
+    { "name": "shift-tab outdents one space level", "action": "shiftTab", "before": "- a\n  - b\n    - c|", "after": "- a\n  - b\n  - c|" },
+    { "name": "shift-tab at the top level does nothing", "action": "shiftTab", "before": "- b|", "after": "- b|" },
+
+    { "name": "backspace after the marker removes it", "action": "backspace", "before": "- |text", "after": "|text" },
+    { "name": "backspace after a task marker removes it", "action": "backspace", "before": "- [ ] |text", "after": "|text" },
+    { "name": "backspace after a nested marker outdents", "action": "backspace", "before": "\t- |text", "after": "- |text" },
+    { "name": "backspace inside the text is normal", "action": "backspace", "before": "- te|xt", "after": null },
+    { "name": "backspace with a selection is normal", "action": "backspace", "before": "- «te»xt", "after": null },
+
+    { "name": "home goes to the start of the item text", "action": "home", "before": "  - some te|xt", "after": "  - |some text" },
+    { "name": "home from the text start goes to the line start", "action": "home", "before": "  - |some text", "after": "|  - some text" },
+    { "name": "home outside a list is normal", "action": "home", "before": "plain te|xt", "after": null },
+
+    { "name": "toggle checks a task", "action": "toggle", "before": "- [ ] bu|y milk", "after": "- [x] bu|y milk" },
+    { "name": "toggle unchecks a task", "action": "toggle", "before": "* [X] bu|y milk", "after": "* [ ] bu|y milk" },
+    { "name": "toggle ignores plain bullets", "action": "toggle", "before": "- bu|y milk", "after": null }
+  ]
+}

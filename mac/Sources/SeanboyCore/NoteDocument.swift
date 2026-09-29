@@ -158,3 +158,59 @@ private extension Substring {
         String(self).trimmingCharacters(in: set)
     }
 }
+
+// MARK: - Editing unmanaged frontmatter (the Properties row)
+
+extension NoteDocument {
+    public enum FrontmatterEdit: Equatable, Sendable {
+        /// Safe to save as the note's `extraFrontmatter`.
+        case accepted([String])
+        /// These lines wouldn't survive a save and reload as written: a
+        /// `---` ends the block early, and managed keys (`id` with a UUID,
+        /// valid `created`/`modified` dates, `seanboy-id`, `deleted`,
+        /// `title`) would be taken over by Seanboy and lost. Nothing is saved.
+        case rejected(lines: [String])
+    }
+
+    /// The Properties editor's text for a note: its unmanaged lines, verbatim.
+    public static func propertiesText(for note: Note) -> String {
+        note.extraFrontmatter.joined(separator: "\n")
+    }
+
+    /// Validates edited Properties text by round-tripping it through the
+    /// real serializer and parser, so the rules can't drift from the codec.
+    /// Unchanged text returns the original lines untouched (byte-faithful).
+    public static func editedFrontmatter(_ text: String, for note: Note) -> FrontmatterEdit {
+        if text == propertiesText(for: note) { return .accepted(note.extraFrontmatter) }
+        var lines = text.components(separatedBy: "\n")
+        while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+            lines.removeLast()
+        }
+
+        var candidate = note
+        candidate.extraFrontmatter = lines
+        let reparsed = parse(serialize(candidate))
+        if reparsed.extraFrontmatter == lines, reparsed.id == note.id, reparsed.body == note.body {
+            return .accepted(lines)
+        }
+        // Report the lines that went missing (or everything after a `---`).
+        var surviving = reparsed.extraFrontmatter[...]
+        var lost: [String] = []
+        for line in lines {
+            if surviving.first == line { surviving = surviving.dropFirst() } else { lost.append(line) }
+        }
+        return .rejected(lines: lost.isEmpty ? lines : lost)
+    }
+
+    /// Top-level keys in unmanaged frontmatter, in order — the collapsed
+    /// Properties row's summary (`tags · aliases`).
+    public static func propertyKeys(_ lines: [String]) -> [String] {
+        var keys: [String] = []
+        for line in lines where !line.hasPrefix(" ") && !line.hasPrefix("\t") && !line.hasPrefix("#") {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = line[..<colon].trimmingCharacters(in: .whitespaces)
+            if !key.isEmpty, !keys.contains(key) { keys.append(key) }
+        }
+        return keys
+    }
+}

@@ -18,5 +18,10 @@ let package = Package(
             name: "SeanboyCoreTests",
             dependencies: ["SeanboyCore"]
         ),
+        // Headless AppKit tests of the editor (offscreen NSTextView).
+        .testTarget(
+            name: "SeanboyTests",
+            dependencies: ["Seanboy"]
+        ),
     ]
 )

@@ -11,8 +11,41 @@ final class NotesViewModel: ObservableObject {
     private var watcher: FolderWatcher?
 
     @Published var searchText: String = ""
-    @Published var selectedNoteID: UUID?
+    @Published var selectedNoteID: UUID? {
+        didSet {
+            guard selectedNoteID != oldValue else { return }
+            flushPendingEdits()
+            titleClash = nil
+            propertiesRejection = nil
+            if freshNoteID != selectedNoteID { freshNoteID = nil }
+        }
+    }
     @Published private(set) var revision = 0  // bumped on any store change
+
+    /// A note created blank by ⌘N; its inline title starts empty (showing
+    /// the "Untitled" placeholder) until it's renamed or deselected.
+    @Published private(set) var freshNoteID: UUID?
+    /// A title edit that couldn't be applied because another note in the
+    /// same folder already has that name.
+    @Published private(set) var titleClash: TitleClash?
+    private var pendingTitle: (id: UUID, title: String)?
+    /// Properties text that couldn't be saved as written (see
+    /// `NoteDocument.editedFrontmatter`); shown with a warning until fixed.
+    @Published private(set) var propertiesRejection: PropertiesRejection?
+    private var pendingProperties: (id: UUID, text: String)?
+
+    struct PropertiesRejection: Equatable {
+        let noteID: UUID
+        let attempted: String
+        let lines: [String]
+    }
+    private var titleCommitTask: Task<Void, Never>?
+
+    struct TitleClash: Equatable {
+        let noteID: UUID
+        let attempted: String
+        let existingTitle: String
+    }
 
     init() {
         NotesViewModel.migrateLegacySupportDirectoryIfNeeded()
@@ -99,14 +132,14 @@ final class NotesViewModel: ObservableObject {
 
     /// Base Application Support directory for the app (`.../Seanboy`).
     static func supportDirectory() -> URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Seanboy", isDirectory: true)
+        AppSettings.supportDirectory
     }
 
     /// One-time rename of the pre-rebrand `TomboyMac` support directory to
     /// `Seanboy`, so existing notes carry over. Runs
     /// only when the new directory doesn't exist yet and the legacy one does.
     static func migrateLegacySupportDirectoryIfNeeded() {
+        guard AppSettings.supportOverride == nil else { return }
         let fm = FileManager.default
         let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let legacy = appSupport.appendingPathComponent("TomboyMac", isDirectory: true)
@@ -142,11 +175,14 @@ final class NotesViewModel: ObservableObject {
 
     // MARK: - Actions
 
+    /// New notes start as `Untitled.md` with an empty inline title; pass a
+    /// title for notes created from a wiki link or quick capture.
     @discardableResult
-    func createNote(title: String = "New Note", body: String = "") -> Note {
-        let note = store.create(title: title, body: body)
+    func createNote(title: String? = nil, body: String = "") -> Note {
+        let note = store.create(title: title ?? "", body: body)
         searchText = ""
         selectedNoteID = note.id
+        freshNoteID = title == nil ? note.id : nil
         sync.noteDidChange()
         return note
     }
@@ -158,12 +194,89 @@ final class NotesViewModel: ObservableObject {
         sync.noteDidChange()
     }
 
-    func updateTitle(_ title: String, for id: UUID) {
-        let trimmed = title.trimmingCharacters(in: .whitespaces)
-        guard var note = store.note(id: id), !trimmed.isEmpty, note.title != trimmed else { return }
-        note.title = trimmed  // moves the file — filename is the title
-        store.update(note)
-        sync.noteDidChange()
+    /// Applies every pending inline edit (title, properties) now.
+    func flushPendingEdits() {
+        flushPendingTitle()
+        flushPendingProperties()
+    }
+
+    // MARK: - Properties (unmanaged frontmatter)
+
+    func propertiesText(for note: Note) -> String {
+        if let rejection = propertiesRejection, rejection.noteID == note.id { return rejection.attempted }
+        return NoteDocument.propertiesText(for: note)
+    }
+
+    func propertiesWarning(for id: UUID) -> String? {
+        guard let rejection = propertiesRejection, rejection.noteID == id else { return nil }
+        let list = rejection.lines.map { "“\($0)”" }.joined(separator: ", ")
+        return "Not saved: \(list) would be lost or break the note’s header. Seanboy manages id, created, and modified itself."
+    }
+
+    /// Called on every keystroke in the Properties editor; saved on
+    /// focus-out and at the same flush points as the title.
+    func editProperties(_ text: String, for id: UUID) {
+        pendingProperties = (id, text)
+    }
+
+    func flushPendingProperties() {
+        guard let (id, text) = pendingProperties else { return }
+        pendingProperties = nil
+        guard var note = store.note(id: id) else { return }
+        switch NoteDocument.editedFrontmatter(text, for: note) {
+        case .accepted(let lines):
+            propertiesRejection = nil
+            guard lines != note.extraFrontmatter else { return }
+            note.extraFrontmatter = lines
+            store.update(note)
+            sync.noteDidChange()
+        case .rejected(let lines):
+            propertiesRejection = PropertiesRejection(noteID: id, attempted: text, lines: lines)
+        }
+    }
+
+    // MARK: - Inline title
+
+    /// What the inline title field shows for `note`.
+    func displayedTitle(for note: Note) -> String {
+        if let clash = titleClash, clash.noteID == note.id { return clash.attempted }
+        return freshNoteID == note.id ? "" : note.title
+    }
+
+    func titleWarning(for id: UUID) -> String? {
+        guard let clash = titleClash, clash.noteID == id else { return nil }
+        return "A note named “\(clash.existingTitle)” already exists in this folder."
+    }
+
+    /// Called on every keystroke in the title; renames after a short pause.
+    func editTitle(_ title: String, for id: UUID) {
+        pendingTitle = (id, title)
+        titleCommitTask?.cancel()
+        titleCommitTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard !Task.isCancelled else { return }
+            self?.flushPendingTitle()
+        }
+    }
+
+    /// Applies any pending title edit now. Called on focus-out, note
+    /// switches, window close, and app deactivation/quit so a typed title
+    /// is never lost.
+    func flushPendingTitle() {
+        titleCommitTask?.cancel()
+        titleCommitTask = nil
+        guard let (id, title) = pendingTitle else { return }
+        pendingTitle = nil
+        switch store.rename(id: id, to: title) {  // moves the file — filename is the title
+        case .renamed:
+            titleClash = nil
+            if freshNoteID == id { freshNoteID = nil }
+            sync.noteDidChange()
+        case .unchanged:
+            titleClash = nil
+        case .clash(let existingTitle):
+            titleClash = TitleClash(noteID: id, attempted: title, existingTitle: existingTitle)
+        }
     }
 
     func deleteNote(id: UUID) {

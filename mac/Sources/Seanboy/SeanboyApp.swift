@@ -38,6 +38,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             QuickCaptureController.shared.show()
         }
         SpotlightIndexer.reindexAll(notes: NotesViewModel.shared.store.activeNotes)
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { NotesViewModel.shared.flushPendingEdits() }
+        }
+    }
+
+    // A typed title or property edit is saved even if the user switches
+    // apps or quits before it's committed.
+    func applicationDidResignActive(_ notification: Notification) {
+        NotesViewModel.shared.flushPendingEdits()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        NotesViewModel.shared.flushPendingEdits()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {

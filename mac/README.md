@@ -38,12 +38,17 @@ Requires macOS 14+.
 All commands run from this directory (`mac/`):
 
 ```sh
-swift test                # unit tests (storage, links, search, sync merge)
+swift test                # unit tests (core) + headless editor tests
 scripts/make-app.sh       # → dist/Seanboy.app (ad-hoc signed)
 open "dist/Seanboy.app"
 ```
 
-For development: `swift run Seanboy`.
+For development, `scripts/run-dev.sh` builds and launches **Seanboy Dev**:
+a separate app (own bundle ID) with its own settings and notes folder under
+`.build/dev-support`, no sync credentials, and no Spotlight indexing, so it
+can run next to your real Seanboy without touching your notes. (It sets
+`SEANBOY_SUPPORT_DIR`, which isolates any build.) Plain `swift run` can't
+show windows, because a bare executable has no app bundle.
 
 ## Keyboard shortcuts
 
@@ -53,6 +58,9 @@ For development: `swift run Seanboy`.
 | ⌘B / ⌘I | Bold / italic |
 | ⇧⌘H | ==Highlight== |
 | ⇧⌘K | Insert `[[wiki link]]` |
+| Return | In a list: continue it (empty item ends it) |
+| Tab / ⇧Tab | In a list: indent / outdent the item |
+| ⌘← | In a list: jump to the item's text, then the line start |
 | ⇧⌘S | Sync now |
 | ⌃⌥⌘N | Quick capture (system-wide) |
 

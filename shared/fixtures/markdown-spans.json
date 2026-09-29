@@ -1,0 +1,85 @@
+{
+  "about": "Live Preview span fixtures shared by the Swift (SeanboyCore) and Kotlin (:core) MarkdownSpans ports. Each expected span is described by source text, not offsets: `text` is everything the span covers, `content` stays visible when rendered, `markers` are hidden when rendered (in order). `level`, `checked`, and `target` appear only when set; `start` (UTF-16 offset of `text`) is optional and checked when present. Spans are listed by start position, longer first.",
+  "cases": [
+    { "name": "plain text has no spans", "input": "Just a sentence.", "spans": [] },
+
+    { "name": "bold", "input": "a **bold** b", "spans": [
+      { "kind": "bold", "text": "**bold**", "content": "bold", "markers": ["**", "**"] } ] },
+    { "name": "italic with stars and underscores", "input": "*one* and _two_", "spans": [
+      { "kind": "italic", "text": "*one*", "content": "one", "markers": ["*", "*"] },
+      { "kind": "italic", "text": "_two_", "content": "two", "markers": ["_", "_"] } ] },
+    { "name": "underscores inside words are not italic", "input": "snake_case_name", "spans": [] },
+    { "name": "strikethrough and highlight", "input": "~~old~~ ==key==", "spans": [
+      { "kind": "strikethrough", "text": "~~old~~", "content": "old", "markers": ["~~", "~~"] },
+      { "kind": "highlight", "text": "==key==", "content": "key", "markers": ["==", "=="] } ] },
+    { "name": "italic nested in bold", "input": "**very *much* so**", "spans": [
+      { "kind": "bold", "text": "**very *much* so**", "content": "very *much* so", "markers": ["**", "**"] },
+      { "kind": "italic", "text": "*much*", "content": "much", "markers": ["*", "*"] } ] },
+    { "name": "emphasis needs non-space inside the markers", "input": "2 * 3 * 4 and ** nope **", "spans": [] },
+    { "name": "unclosed markers are plain text", "input": "**open and ==also", "spans": [] },
+    { "name": "escaped markers are literal", "input": "\\*not italic\\* and \\[[not a link]]", "spans": [] },
+
+    { "name": "inline code is opaque", "input": "run `**x**` now", "spans": [
+      { "kind": "code", "text": "`**x**`", "content": "**x**", "markers": ["`", "`"] } ] },
+    { "name": "bold can wrap code", "input": "**use `ls`**", "spans": [
+      { "kind": "bold", "text": "**use `ls`**", "content": "use `ls`", "markers": ["**", "**"] },
+      { "kind": "code", "text": "`ls`", "content": "ls", "markers": ["`", "`"] } ] },
+
+    { "name": "wiki link", "input": "see [[Recipes]]", "spans": [
+      { "kind": "wikiLink", "text": "[[Recipes]]", "content": "Recipes", "markers": ["[[", "]]"], "target": "Recipes" } ] },
+    { "name": "wiki link with alias shows the alias", "input": "[[Projects/Seanboy|the app]]", "spans": [
+      { "kind": "wikiLink", "text": "[[Projects/Seanboy|the app]]", "content": "the app", "markers": ["[[Projects/Seanboy|", "]]"], "target": "Projects/Seanboy" } ] },
+    { "name": "wiki link target is trimmed", "input": "[[ Ideas ]]", "spans": [
+      { "kind": "wikiLink", "text": "[[ Ideas ]]", "content": " Ideas ", "markers": ["[[", "]]"], "target": "Ideas" } ] },
+    { "name": "markdown link", "input": "[docs](https://example.com/a)", "spans": [
+      { "kind": "link", "text": "[docs](https://example.com/a)", "content": "docs", "markers": ["[", "](https://example.com/a)"], "target": "https://example.com/a" } ] },
+    { "name": "bare url drops trailing punctuation", "input": "Go to https://example.com/x.", "spans": [
+      { "kind": "url", "text": "https://example.com/x", "content": "https://example.com/x", "markers": [], "target": "https://example.com/x" } ] },
+    { "name": "emphasis markers inside a url are not italic", "input": "https://a.com/_x_/y", "spans": [
+      { "kind": "url", "text": "https://a.com/_x_/y", "content": "https://a.com/_x_/y", "markers": [], "target": "https://a.com/_x_/y" } ] },
+
+    { "name": "headings by level", "input": "# One\n### Three", "spans": [
+      { "kind": "heading", "text": "# One", "content": "One", "markers": ["# "], "level": 1 },
+      { "kind": "heading", "text": "### Three", "content": "Three", "markers": ["### "], "level": 3 } ] },
+    { "name": "hashtag is not a heading", "input": "#tag", "spans": [] },
+    { "name": "heading content gets inline spans", "input": "## A **big** deal", "spans": [
+      { "kind": "heading", "text": "## A **big** deal", "content": "A **big** deal", "markers": ["## "], "level": 2 },
+      { "kind": "bold", "text": "**big**", "content": "big", "markers": ["**", "**"] } ] },
+    { "name": "quote", "input": "> wise words", "spans": [
+      { "kind": "quote", "text": "> wise words", "content": "wise words", "markers": ["> "] } ] },
+    { "name": "horizontal rules", "input": "---\n* * *", "spans": [
+      { "kind": "rule", "text": "---", "content": "", "markers": ["---"] },
+      { "kind": "rule", "text": "* * *", "content": "", "markers": ["* * *"] } ] },
+
+    { "name": "bullets with indent level", "input": "- one\n  * two", "spans": [
+      { "kind": "bullet", "text": "- one", "content": "one", "markers": ["- "] },
+      { "kind": "bullet", "text": "* two", "content": "two", "markers": ["* "], "level": 2 } ] },
+    { "name": "tab indent counts as four", "input": "\t+ deep", "spans": [
+      { "kind": "bullet", "text": "+ deep", "content": "deep", "markers": ["+ "], "level": 4 } ] },
+    { "name": "ordered items", "input": "1. first\n10) tenth", "spans": [
+      { "kind": "orderedItem", "text": "1. first", "content": "first", "markers": ["1. "] },
+      { "kind": "orderedItem", "text": "10) tenth", "content": "tenth", "markers": ["10) "] } ] },
+    { "name": "tasks open, done, and empty", "input": "- [ ] buy milk\n- [x] call mom\n- [ ]", "spans": [
+      { "kind": "task", "text": "- [ ] buy milk", "content": "buy milk", "markers": ["- [ ] "] },
+      { "kind": "task", "text": "- [x] call mom", "content": "call mom", "markers": ["- [x] "], "checked": true },
+      { "kind": "task", "text": "- [ ]", "content": "", "markers": ["- [ ]"] } ] },
+    { "name": "list item content gets inline spans", "input": "- see [[Plan]]", "spans": [
+      { "kind": "bullet", "text": "- see [[Plan]]", "content": "see [[Plan]]", "markers": ["- "] },
+      { "kind": "wikiLink", "text": "[[Plan]]", "content": "Plan", "markers": ["[[", "]]"], "target": "Plan" } ] },
+
+    { "name": "fenced code block is opaque", "input": "```swift\nlet **x** = 1\n# not a heading\n```\nafter **bold**", "spans": [
+      { "kind": "codeBlock", "text": "```swift\nlet **x** = 1\n# not a heading\n```", "content": "let **x** = 1\n# not a heading", "markers": ["```swift", "```"] },
+      { "kind": "bold", "text": "**bold**", "content": "bold", "markers": ["**", "**"] } ] },
+    { "name": "empty fenced block", "input": "~~~\n~~~", "spans": [
+      { "kind": "codeBlock", "text": "~~~\n~~~", "content": "", "markers": ["~~~", "~~~"] } ] },
+    { "name": "unclosed fence runs to the end", "input": "```\ncode **here**", "spans": [
+      { "kind": "codeBlock", "text": "```\ncode **here**", "content": "code **here**", "markers": ["```"] } ] },
+    { "name": "CRLF line endings", "input": "```\r\nx\r\n```\r\n# Hi", "spans": [
+      { "kind": "codeBlock", "text": "```\r\nx\r\n```", "content": "x", "markers": ["```", "```"] },
+      { "kind": "heading", "text": "# Hi", "content": "Hi", "markers": ["# "], "level": 1 } ] },
+
+    { "name": "offsets are UTF-16 (emoji before a span)", "input": "🎉 **yay**", "spans": [
+      { "kind": "bold", "text": "**yay**", "content": "yay", "markers": ["**", "**"], "start": 3 } ] },
+    { "name": "spans never cross lines", "input": "**not\nbold**", "spans": [] }
+  ]
+}

@@ -110,31 +110,28 @@ private struct NoteRow: View {
 struct NoteDetailView: View {
     @EnvironmentObject private var model: NotesViewModel
     let note: Note
-    @State private var title: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            TextField("Title", text: $title)
-                .textFieldStyle(.plain)
-                .font(.title2.weight(.semibold))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .onSubmit { model.updateTitle(title, for: note.id) }
-
-            Divider()
-
             MarkdownEditor(
                 text: Binding(
                     get: { model.selectedNote?.body ?? note.body },
                     set: { model.updateBody($0, for: note.id) }
                 ),
+                title: model.displayedTitle(for: model.selectedNote ?? note),
+                titleWarning: model.titleWarning(for: note.id),
+                focusTitle: model.freshNoteID == note.id,
+                onTitleEdit: { model.editTitle($0, for: note.id) },
+                onTitleCommit: { model.flushPendingTitle() },
+                propertiesText: model.propertiesText(for: model.selectedNote ?? note),
+                propertiesWarning: model.propertiesWarning(for: note.id),
+                onPropertiesEdit: { model.editProperties($0, for: note.id) },
+                onPropertiesCommit: { model.flushPendingProperties() },
                 onOpenWikiLink: { model.openNote(titled: $0) }
             )
 
             backlinksBar
         }
-        .onAppear { title = note.title }
-        .onDisappear { model.updateTitle(title, for: note.id) }
         .navigationTitle("")
     }
 

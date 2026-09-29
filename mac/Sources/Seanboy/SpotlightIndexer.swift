@@ -11,6 +11,8 @@ enum SpotlightIndexer {
 
     /// Debounced — the store calls this on every keystroke.
     static func reindexAll(notes: [Note]) {
+        // Isolated dev runs must not replace the real app's index.
+        guard AppSettings.supportOverride == nil else { return }
         pending?.cancel()
         let work = DispatchWorkItem { performReindex(notes: notes) }
         pending = work
@@ -39,6 +41,7 @@ enum SpotlightIndexer {
     }
 
     static func remove(id: UUID) {
+        guard AppSettings.supportOverride == nil else { return }
         CSSearchableIndex.default()
             .deleteSearchableItems(withIdentifiers: [id.uuidString]) { _ in }
     }

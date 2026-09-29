@@ -84,6 +84,30 @@ public final class NoteStore {
         write(updated)
     }
 
+    public enum RenameResult: Equatable {
+        case renamed(Note)
+        /// Blank title, or the same filename it already has.
+        case unchanged
+        /// Another note already owns that filename in this folder.
+        case clash(existingTitle: String)
+    }
+
+    /// Title edits from the UI. Unlike `update`, never lets a rename land on
+    /// another note's file: a clash is reported and nothing moves.
+    @discardableResult
+    public func rename(id: UUID, to title: String) -> RenameResult {
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        guard var note = notesByID[id], !trimmed.isEmpty else { return .unchanged }
+        note.title = trimmed
+        let current = notesByID[id]!.relativePath
+        if note.relativePath == current { return .unchanged }
+        if let owner = idByPath[note.relativePath.lowercased()], owner != id {
+            return .clash(existingTitle: notesByID[owner]?.title ?? note.title)
+        }
+        update(note)
+        return .renamed(notesByID[id] ?? note)
+    }
+
     /// Moves the file to the macOS Trash and records a tombstone so the
     /// deletion syncs to other devices.
     public func delete(id: UUID) {
@@ -285,10 +309,10 @@ public final class NoteStore {
         fsModifiedByPath[note.relativePath] = nil
     }
 
-    /// "New Note", "New Note 2", … unique within `folder`.
+    /// "Untitled", "Untitled 2", … unique within `folder`.
     private func uniqueTitle(from base: String, in folder: String) -> String {
         let trimmed = base.trimmingCharacters(in: .whitespaces)
-        let candidate = trimmed.isEmpty ? "New Note" : trimmed
+        let candidate = trimmed.isEmpty ? "Untitled" : trimmed
         func taken(_ title: String) -> Bool {
             let filename = NoteNaming.filename(forTitle: title)
             let path = folder.isEmpty ? filename : folder + "/" + filename
