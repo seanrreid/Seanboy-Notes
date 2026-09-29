@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
+import com.torchcodelab.seanboy.core.AutoLinks
 
 /**
  * The Live Preview body editor for one note. Key it by note id at the call
@@ -21,6 +22,7 @@ fun LivePreviewEditor(
     onChange: (String) -> Unit,
     onOpenWikiLink: (String) -> Unit,
     onReady: (LivePreviewEditText) -> Unit,
+    autoLinks: AutoLinks?,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -32,6 +34,7 @@ fun LivePreviewEditor(
         codeBackground = scheme.surfaceContainerHigh.toArgb(),
         highlight = Color(0xFFFFD60A).copy(alpha = 0.35f).toArgb(),
         rule = scheme.outlineVariant.toArgb(),
+        autoLink = scheme.primary.copy(alpha = 0.7f).toArgb(),
     )
     val textColor = scheme.onSurface.toArgb()
     val hintColor = scheme.onSurfaceVariant.toArgb()
@@ -55,6 +58,7 @@ fun LivePreviewEditor(
             view.onMarkdownChange = onChange
             view.onOpenWikiLink = onOpenWikiLink
             view.colors = colors
+            view.autoLinks = autoLinks
             view.setTextColor(textColor)
             view.setHintTextColor(hintColor)
             view.highlightColor = selectionColor

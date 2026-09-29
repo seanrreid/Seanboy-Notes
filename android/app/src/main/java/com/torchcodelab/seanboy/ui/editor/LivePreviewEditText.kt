@@ -15,6 +15,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import com.torchcodelab.seanboy.core.AutoLinks
 import com.torchcodelab.seanboy.core.ListEditing
 import com.torchcodelab.seanboy.core.LivePreview
 import com.torchcodelab.seanboy.core.MarkdownSpans
@@ -36,7 +37,7 @@ import com.torchcodelab.seanboy.core.SpanRange
  * key events, so those rules run on the change itself.
  *
  * Taps on a rendered checkbox toggle it; taps on a rendered link open it
- * (a note for `[[wiki links]]`, the browser for URLs). On the cursor line a
+ * (a note for `[[wiki links]]` and auto-linked titles, the browser for URLs). On the cursor line a
  * tap just places the cursor, so links there stay editable.
  */
 @SuppressLint("AppCompatCustomView", "ViewConstructor")
@@ -47,6 +48,14 @@ class LivePreviewEditText(context: Context) : EditText(context) {
     var colors: LivePreviewColors? = null
         set(value) {
             if (value == field) return
+            field = value
+            styleAll()
+        }
+
+    /** Other notes' titles to underline in the text, or null when auto-links are off. */
+    var autoLinks: AutoLinks? = null
+        set(value) {
+            if (value === field) return
             field = value
             styleAll()
         }
@@ -214,8 +223,9 @@ class LivePreviewEditText(context: Context) : EditText(context) {
             minOf(range.length, markdown.length - minOf(range.location, markdown.length)),
         )
         val (spans, covered) = MarkdownSpans.parse(markdown, clamped)
+        val links = autoLinks?.find(markdown, spans, covered).orEmpty()
         LivePreviewSpans.clear(text, covered)
-        LivePreviewSpans.apply(text, LivePreview.styles(markdown, spans, revealedLines), colors, density)
+        LivePreviewSpans.apply(text, LivePreview.styles(markdown, spans, revealedLines, links), colors, density, ::getLayout)
     }
 
     /**
@@ -322,12 +332,14 @@ class LivePreviewEditText(context: Context) : EditText(context) {
         val boundary = layout.getOffsetForHorizontal(line, layoutX)
         val offset = if (boundary > lineStart && layoutX < layout.getPrimaryHorizontal(boundary)) boundary - 1 else boundary
         val revealed = revealedLines
-        return text.getSpans(offset, offset + 1, LivePreviewSpans.LinkSpan::class.java).firstOrNull { link ->
-            val start = text.getSpanStart(link)
-            val end = text.getSpanEnd(link)
-            // Links on the cursor lines are for editing; tapping places the cursor.
-            offset in start until end && (revealed == null || start > revealed.end || end < revealed.location)
+        // Links on the cursor lines are for editing; tapping there places the cursor.
+        fun tappable(span: Any): Boolean {
+            val start = text.getSpanStart(span)
+            val end = text.getSpanEnd(span)
+            return offset in start until end && (revealed == null || start > revealed.end || end < revealed.location)
         }
+        return text.getSpans(offset, offset + 1, LivePreviewSpans.LinkSpan::class.java).firstOrNull(::tappable)
+            ?: text.getSpans(offset, offset + 1, LivePreviewSpans.AutoLinkSpan::class.java).firstOrNull(::tappable)
     }
 
     private fun activate(target: Any) {
@@ -342,6 +354,7 @@ class LivePreviewEditText(context: Context) : EditText(context) {
                 text.replace(box, box + 1, if (target.checked) " " else "x")
                 if (hasFocus()) setSelection(start.coerceAtMost(text.length), end.coerceAtMost(text.length))
             }
+            is LivePreviewSpans.AutoLinkSpan -> onOpenWikiLink?.invoke(target.title)
             is LivePreviewSpans.LinkSpan -> if (target.isWikiLink) {
                 onOpenWikiLink?.invoke(target.target)
             } else {

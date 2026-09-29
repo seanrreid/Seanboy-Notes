@@ -42,6 +42,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         /** Typing pause before a title edit renames the file (same as the Mac). */
         const val TITLE_COMMIT_DELAY_MS = 750L
+        private const val PREF_AUTO_LINKS = "autoLinks"
     }
 
     private val container = AppContainer(app)
@@ -92,6 +93,25 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     val folderTree: StateFlow<List<FolderListing.Subfolder>> =
         _notes.map { FolderListing.tree(it) }
             .stateIn(viewModelScope, SharingStarted.Eagerly, FolderListing.tree(store.activeNotes))
+
+    /**
+     * Every note title, for auto-links. Only changes when a title does (not on
+     * every keystroke), so the editor rebuilds its matcher only then.
+     */
+    val noteTitles: StateFlow<List<String>> =
+        _notes.map { notes -> notes.map { it.title }.distinct().sorted() }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, store.activeNotes.map { it.title }.distinct().sorted())
+
+    private val prefs = app.getSharedPreferences("seanboy", android.content.Context.MODE_PRIVATE)
+
+    /** Auto-links to other notes' titles in the editor (Settings → Editor). On by default. */
+    private val _autoLinksEnabled = MutableStateFlow(prefs.getBoolean(PREF_AUTO_LINKS, true))
+    val autoLinksEnabled: StateFlow<Boolean> = _autoLinksEnabled.asStateFlow()
+
+    fun setAutoLinksEnabled(enabled: Boolean) {
+        _autoLinksEnabled.value = enabled
+        prefs.edit().putBoolean(PREF_AUTO_LINKS, enabled).apply()
+    }
 
     val selectedNote: StateFlow<Note?> =
         combine(_notes, _selectedId) { _, id -> id?.let { store.note(it) } }
