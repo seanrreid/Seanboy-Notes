@@ -7,6 +7,8 @@ import Foundation
 enum AppSettings {
     struct Contents: Codable, Equatable {
         var notesFolderPath: String?
+        /// Auto-links to other notes' titles in the editor; nil means on.
+        var autoLinks: Bool?
     }
 
     /// Set to a scratch directory to run the app fully isolated from the real
@@ -43,6 +45,12 @@ enum AppSettings {
         } catch {
             NSLog("Seanboy: failed to save settings: \(error)")
         }
+    }
+
+    static func setAutoLinks(_ enabled: Bool) {
+        var contents = load()
+        contents.autoLinks = enabled
+        save(contents)
     }
 
     static func setNotesFolder(_ url: URL) {

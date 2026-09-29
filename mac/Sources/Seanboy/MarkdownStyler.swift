@@ -14,6 +14,9 @@ extension NSAttributedString.Key {
     /// The `[ ]`/`[x]` box character of a rendered task (value: checked).
     /// Drawn as a space widened by kern, with a checkbox painted over it.
     static let livePreviewCheckbox = NSAttributedString.Key("SeanboyLivePreviewCheckbox")
+    /// Text matching another note's title (value: that title). Dotted
+    /// underline; ⌘-click opens the note. Display only.
+    static let livePreviewAutoLink = NSAttributedString.Key("SeanboyLivePreviewAutoLink")
 }
 
 /// Turns `MarkdownSpans` into text attributes, Obsidian Live Preview style:
@@ -37,15 +40,24 @@ enum MarkdownStyler {
     /// whose markers stay visible (the cursor lines), or nil to render
     /// everything. Callers outside an editing pass wrap this in
     /// `beginEditing`/`endEditing`; from `textStorage(_:didProcessEditing:…)`
-    /// the storage is already editing.
+    /// the storage is already editing. `autoLinks` underlines other notes'
+    /// titles (nil when auto-links are off).
     @discardableResult
     static func restyle(_ storage: NSTextStorage, around edited: NSRange,
-                        revealing revealed: NSRange?) -> NSRange {
-        let (spans, covered) = MarkdownSpans.parse(storage.string, linesTouching: edited)
+                        revealing revealed: NSRange?, autoLinks: AutoLinks? = nil) -> NSRange {
+        let text = storage.string
+        let (spans, covered) = MarkdownSpans.parse(text, linesTouching: edited)
         guard covered.length > 0 else { return covered }
         storage.setAttributes(baseAttributes, range: covered)
         for span in spans {
             apply(span, to: storage, revealed: isRevealed(span, revealed))
+        }
+        for link in autoLinks?.find(in: text, spans: spans, range: covered) ?? [] {
+            storage.addAttributes([
+                .underlineStyle: NSUnderlineStyle.single.rawValue | NSUnderlineStyle.patternDot.rawValue,
+                .underlineColor: NSColor.controlAccentColor.withAlphaComponent(0.7),
+                .livePreviewAutoLink: link.title,
+            ], range: link.range)
         }
         return covered
     }

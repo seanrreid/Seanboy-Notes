@@ -56,6 +56,13 @@ struct SyncSettingsView: View {
                     .disabled(!sync.isConfigured)
             }
 
+            Section("Editor") {
+                Toggle("Link note titles automatically", isOn: $model.autoLinksEnabled)
+                Text("Text matching another note's title gets a dotted underline; ⌘-click it to open that note. Display only — nothing is added to your notes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if let message {
                 Text(message)
                     .font(.caption)
