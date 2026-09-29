@@ -179,4 +179,58 @@ object NoteDocument {
         lines.add(note.body)
         return lines.joinToString("\n")
     }
+
+    // MARK: - Properties (unmanaged frontmatter)
+
+    sealed interface FrontmatterEdit {
+        /** Safe to save as the note's `extraFrontmatter`. */
+        data class Accepted(val lines: List<String>) : FrontmatterEdit
+
+        /**
+         * These lines wouldn't survive a save and reload as written: a `---`
+         * ends the block early, and managed keys (`id` with a UUID, valid
+         * `created`/`modified` dates, `seanboy-id`, `deleted`, `title`) would
+         * be taken over by Seanboy and lost. Nothing is saved.
+         */
+        data class Rejected(val lines: List<String>) : FrontmatterEdit
+    }
+
+    /** The Properties editor's text for a note: its unmanaged lines, verbatim. */
+    fun propertiesText(note: Note): String = note.extraFrontmatter.joinToString("\n")
+
+    /**
+     * Validates edited Properties text by round-tripping it through the real
+     * serializer and parser, so the rules can't drift from the codec.
+     * Unchanged text returns the original lines untouched (byte-faithful).
+     */
+    fun editedFrontmatter(text: String, note: Note): FrontmatterEdit {
+        if (text == propertiesText(note)) return FrontmatterEdit.Accepted(note.extraFrontmatter)
+        val lines = text.split("\n").toMutableList()
+        while (lines.isNotEmpty() && lines.last().all { it == ' ' || it == '\t' }) lines.removeAt(lines.lastIndex)
+
+        val reparsed = parse(serialize(note.copy(extraFrontmatter = lines)))
+        if (reparsed.extraFrontmatter == lines && reparsed.id == note.id && reparsed.body == note.body) {
+            return FrontmatterEdit.Accepted(lines)
+        }
+        // Report the lines that went missing (or everything after a `---`).
+        var surviving = 0
+        val lost = mutableListOf<String>()
+        for (line in lines) {
+            if (reparsed.extraFrontmatter.getOrNull(surviving) == line) surviving++ else lost += line
+        }
+        return FrontmatterEdit.Rejected(lost.ifEmpty { lines })
+    }
+
+    /** Top-level keys in unmanaged frontmatter, in order: the collapsed Properties row's summary. */
+    fun propertyKeys(lines: List<String>): List<String> {
+        val keys = mutableListOf<String>()
+        for (line in lines) {
+            if (line.startsWith(" ") || line.startsWith("\t") || line.startsWith("#")) continue
+            val colon = line.indexOf(':')
+            if (colon < 0) continue
+            val key = line.substring(0, colon).trim()
+            if (key.isNotEmpty() && key !in keys) keys += key
+        }
+        return keys
+    }
 }

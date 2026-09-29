@@ -31,8 +31,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Backgrounding must not lose a title that's still inside its typing pause.
-        vm?.flushPendingTitle()
+        // Backgrounding must not lose a title in its typing pause, or unsaved properties.
+        vm?.flushPendingEdits()
     }
 
     override fun onResume() {

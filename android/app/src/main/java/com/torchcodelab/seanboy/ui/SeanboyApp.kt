@@ -1,6 +1,11 @@
 package com.torchcodelab.seanboy.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import com.torchcodelab.seanboy.core.NoteDocument
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.ui.text.input.KeyboardType
@@ -468,6 +473,7 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+            key(note.id) { PropertiesRow(vm, note) }
             // Live Preview: Markdown styled in place, markers shown only on the cursor lines.
             key(note.id) {
                 LivePreviewEditor(
@@ -492,6 +498,83 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The note's unmanaged frontmatter (Obsidian tags, aliases, …) as a collapsed
+ * row under the title — "Properties · tags · aliases" — that expands to the
+ * raw YAML. Edits save on focus-out and at the title's flush points; text that
+ * wouldn't survive a save (a `---`, or keys Seanboy manages) stays unsaved
+ * with a warning. Hidden for notes without properties.
+ */
+@Composable
+private fun PropertiesRow(vm: NotesViewModel, note: Note) {
+    var text by remember { mutableStateOf(vm.propertiesText(note)) }
+    var expanded by remember { mutableStateOf(false) }
+    var focused by remember { mutableStateOf(false) }
+    val rejection by vm.propertiesRejection.collectAsState()
+    val warning = rejection?.takeIf { it.noteId == note.id }?.let { r ->
+        "Not saved: " + r.lines.joinToString(", ") { "“$it”" } +
+            " would be lost or break the note's header. Seanboy manages id, created, and modified itself."
+    }
+    if (text.isEmpty() && !expanded && warning == null) return
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        val keys = NoteDocument.propertyKeys(text.split("\n"))
+        Row(
+            Modifier.clip(RoundedCornerShape(8.dp)).clickable {
+                if (expanded) vm.flushPendingProperties()
+                expanded = !expanded
+            }.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.size(4.dp))
+            Text(
+                if (expanded || keys.isEmpty()) "Properties" else "Properties  ·  " + keys.joinToString(" · "),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (expanded) {
+            TextField(
+                value = text,
+                onValueChange = { text = it; vm.editProperties(note.id, it) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    keyboardType = KeyboardType.Text,
+                ),
+                shape = RoundedCornerShape(12.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).onFocusChanged {
+                    if (focused && !it.isFocused) vm.flushPendingProperties()
+                    focused = it.isFocused
+                },
+            )
+        }
+        if (warning != null) {
+            Text(
+                warning,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
         }
     }
 }
