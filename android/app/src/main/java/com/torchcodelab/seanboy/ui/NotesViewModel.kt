@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +66,11 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         combine(_notes, _folder) { notes, folder ->
             FolderListing.of(notes, FolderListing.nearestExisting(notes, folder))
         }.stateIn(viewModelScope, SharingStarted.Eagerly, FolderListing.of(store.activeNotes, ""))
+
+    /** Every folder, depth-first, for the side drawer. */
+    val folderTree: StateFlow<List<FolderListing.Subfolder>> =
+        _notes.map { FolderListing.tree(it) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, FolderListing.tree(store.activeNotes))
 
     val selectedNote: StateFlow<Note?> =
         combine(_notes, _selectedId) { _, id -> id?.let { store.note(it) } }

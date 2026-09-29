@@ -74,4 +74,19 @@ class FolderListingTest {
         )
         assertEquals(listOf(FolderListing.Crumb("Seanboy", "")), FolderListing.breadcrumbs("", "Seanboy"))
     }
+
+    @Test
+    fun treeIsDepthFirstInSidebarOrder() {
+        assertEquals(
+            listOf(
+                FolderListing.Subfolder("archive", "archive", 1),
+                FolderListing.Subfolder("Journal", "Journal", 3),
+                FolderListing.Subfolder("2026", "Journal/2026", 2),
+                FolderListing.Subfolder("Projects", "Projects", 1),
+            ),
+            FolderListing.tree(notes),
+        )
+        assertEquals(1, FolderListing.depth("Journal/2026"))
+        assertEquals(0, FolderListing.depth("Journal"))
+    }
 }

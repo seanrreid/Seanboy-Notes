@@ -64,6 +64,25 @@ data class FolderListing(
             return ""
         }
 
+        /**
+         * Every folder, depth-first in sidebar order: each folder is followed
+         * by its own subfolders before its next sibling. For the side drawer.
+         */
+        fun tree(notes: List<Note>): List<Subfolder> {
+            val out = mutableListOf<Subfolder>()
+            fun walk(folder: String) {
+                for (sub in of(notes, folder).subfolders) {
+                    out += sub
+                    walk(sub.path)
+                }
+            }
+            walk("")
+            return out
+        }
+
+        /** 0 for top-level folders, 1 for "Journal/2026", and so on. */
+        fun depth(folder: String): Int = folder.count { it == '/' }
+
         /** "Journal/2026" → "Journal"; top-level folders → "". */
         fun parent(folder: String): String = folder.substringBeforeLast('/', missingDelimiterValue = "")
 
