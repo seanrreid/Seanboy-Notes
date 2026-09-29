@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Adaptive-icon background behind the Tomboy note+pencil artwork. -->
+    <color name="ic_launcher_background">#F5E9C9</color>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Base theme applied by the manifest before Compose takes over. NoActionBar
+      because the UI is entirely Compose. Material3 DayNight follows the system
+      light/dark setting.
+    -->
+    <style name="Theme.Seanboy" parent="Theme.Material3.DayNight.NoActionBar" />
+</resources>

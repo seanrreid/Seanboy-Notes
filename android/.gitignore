@@ -1,0 +1,19 @@
+# Android / Gradle build artifacts
+.gradle/
+build/
+*/build/
+
+# Local SDK location — machine-specific, never committed
+local.properties
+
+# IDE
+.idea/
+*.iml
+.cxx/
+
+# Keystores / secrets (no release signing in v1, but never commit keys)
+*.jks
+*.keystore
+
+# The Gradle wrapper jar MUST be tracked (a global *.jar ignore would drop it).
+!gradle/wrapper/gradle-wrapper.jar
