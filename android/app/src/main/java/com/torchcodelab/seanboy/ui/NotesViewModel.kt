@@ -5,11 +5,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.torchcodelab.seanboy.core.FolderListing
 import com.torchcodelab.seanboy.core.Note
+import com.torchcodelab.seanboy.core.NoteStore
 import com.torchcodelab.seanboy.core.S3Config
 import com.torchcodelab.seanboy.core.SearchService
 import com.torchcodelab.seanboy.core.WikiLinkParser
 import com.torchcodelab.seanboy.data.AppContainer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +38,11 @@ sealed interface SyncStatus {
  * triggers. All engine work runs off the main thread.
  */
 class NotesViewModel(app: Application) : AndroidViewModel(app) {
+    companion object {
+        /** Typing pause before a title edit renames the file (same as the Mac). */
+        const val TITLE_COMMIT_DELAY_MS = 750L
+    }
+
     private val container = AppContainer(app)
     private val store = container.store
 
@@ -47,6 +55,18 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _selectedId = MutableStateFlow<UUID?>(null)
     val selectedId: StateFlow<UUID?> = _selectedId.asStateFlow()
+
+    /** A note created blank by ＋: its title field starts empty ("Untitled" placeholder). */
+    private val _freshNoteId = MutableStateFlow<UUID?>(null)
+    val freshNoteId: StateFlow<UUID?> = _freshNoteId.asStateFlow()
+
+    /** A title edit that couldn't be applied: another note in the folder has that name. */
+    data class TitleClash(val noteId: UUID, val attempted: String, val existingTitle: String)
+    private val _titleClash = MutableStateFlow<TitleClash?>(null)
+    val titleClash: StateFlow<TitleClash?> = _titleClash.asStateFlow()
+
+    private var pendingTitle: Pair<UUID, String>? = null
+    private var titleCommitJob: Job? = null
 
     private val _sync = MutableStateFlow<SyncStatus>(
         if (container.isSyncConfigured) SyncStatus.Idle else SyncStatus.NotConfigured,
@@ -84,7 +104,14 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setQuery(value: String) { _query.value = value }
 
-    fun select(id: UUID?) { _selectedId.value = id }
+    /** Opens a note (or returns to the list with null), committing any typed title first. */
+    fun select(id: UUID?) {
+        if (id == _selectedId.value) return
+        flushPendingTitle()
+        _titleClash.value = null
+        if (_freshNoteId.value != id) _freshNoteId.value = null
+        _selectedId.value = id
+    }
 
     fun openFolder(path: String) { _folder.value = path }
 
@@ -96,10 +123,11 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    /** New notes land in the folder being browsed. */
+    /** New notes land in the folder being browsed, as `Untitled` with an empty title field. */
     fun createNote() {
-        val note = store.create(title = "New Note", folder = listing.value.folder)
-        _selectedId.value = note.id
+        val note = store.create(title = "", folder = listing.value.folder)
+        select(note.id)
+        _freshNoteId.value = note.id
         maybeSync()
     }
 
@@ -108,14 +136,53 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         store.update(note.copy(body = body))
     }
 
-    fun rename(id: UUID, newTitle: String) {
-        val note = store.note(id) ?: return
-        store.update(note.withTitle(newTitle))
+    // MARK: - Inline title
+
+    /** What the title field shows: the rejected attempt during a clash, blank for a fresh note. */
+    fun displayedTitle(note: Note): String {
+        _titleClash.value?.let { if (it.noteId == note.id) return it.attempted }
+        return if (_freshNoteId.value == note.id) "" else note.title
+    }
+
+    /** Called on every keystroke in the title; renames after a short pause. */
+    fun editTitle(id: UUID, title: String) {
+        pendingTitle = id to title
+        titleCommitJob?.cancel()
+        titleCommitJob = viewModelScope.launch {
+            delay(TITLE_COMMIT_DELAY_MS)
+            flushPendingTitle()
+        }
+    }
+
+    /**
+     * Applies any pending title edit now. Called on focus-out, Back, note
+     * switches, and when the app goes to the background, so a typed title is
+     * never lost.
+     */
+    fun flushPendingTitle() {
+        titleCommitJob?.cancel()
+        titleCommitJob = null
+        val (id, title) = pendingTitle ?: return
+        pendingTitle = null
+        when (val result = store.rename(id, title)) { // moves the file — the filename is the title
+            is NoteStore.RenameResult.Renamed -> {
+                _titleClash.value = null
+                if (_freshNoteId.value == id) _freshNoteId.value = null
+                maybeSync()
+            }
+            NoteStore.RenameResult.Unchanged -> _titleClash.value = null
+            is NoteStore.RenameResult.Clash ->
+                _titleClash.value = TitleClash(id, attempted = title, existingTitle = result.existingTitle)
+        }
     }
 
     fun delete(id: UUID) {
+        if (pendingTitle?.first == id) {
+            titleCommitJob?.cancel()
+            pendingTitle = null
+        }
         store.delete(id)
-        if (_selectedId.value == id) _selectedId.value = null
+        if (_selectedId.value == id) select(null)
         maybeSync()
     }
 
@@ -125,8 +192,12 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     fun openWikiLink(title: String) {
         val existing = store.noteTitled(title)
         val note = existing ?: store.create(title = title)
-        _selectedId.value = note.id
+        select(note.id)
         if (existing == null) maybeSync()
+    }
+
+    override fun onCleared() {
+        flushPendingTitle()
     }
 
     // MARK: - Sync

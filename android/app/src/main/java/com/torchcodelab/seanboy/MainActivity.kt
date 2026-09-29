@@ -29,6 +29,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        // Backgrounding must not lose a title that's still inside its typing pause.
+        vm?.flushPendingTitle()
+    }
+
     override fun onResume() {
         super.onResume()
         // Pick up any external changes, then sync if credentials are set.

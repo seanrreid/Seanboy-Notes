@@ -108,6 +108,32 @@ class NoteStore(
         write(updated)
     }
 
+    sealed interface RenameResult {
+        data class Renamed(val note: Note) : RenameResult
+        /** Blank title, or the same filename it already has. */
+        data object Unchanged : RenameResult
+        /** Another note already owns that filename in this folder. */
+        data class Clash(val existingTitle: String) : RenameResult
+    }
+
+    /**
+     * Title edits from the UI. Unlike [update], never lets a rename land on
+     * another note's file: a clash is reported and nothing moves.
+     */
+    fun rename(id: UUID, title: String): RenameResult {
+        val trimmed = title.trim()
+        val current = _notesByID[id] ?: return RenameResult.Unchanged
+        if (trimmed.isEmpty()) return RenameResult.Unchanged
+        val renamed = current.withTitle(trimmed)
+        if (renamed.relativePath == current.relativePath) return RenameResult.Unchanged
+        val owner = idByPath[renamed.relativePath.lowercase()]
+        if (owner != null && owner != id) {
+            return RenameResult.Clash(_notesByID[owner]?.title ?: renamed.title)
+        }
+        update(renamed)
+        return RenameResult.Renamed(_notesByID[id] ?: renamed)
+    }
+
     /** Removes the file and records a tombstone so the deletion syncs. */
     fun delete(id: UUID) {
         val note = _notesByID[id] ?: return
@@ -288,10 +314,10 @@ class NoteStore(
         fsModifiedByPath.remove(note.relativePath)
     }
 
-    /** "New Note", "New Note 2", … unique within [folder]. */
+    /** "Untitled", "Untitled 2", … unique within [folder]. */
     private fun uniqueTitle(base: String, folder: String): String {
         val trimmed = base.trim()
-        val candidate = trimmed.ifEmpty { "New Note" }
+        val candidate = trimmed.ifEmpty { "Untitled" }
         fun taken(title: String): Boolean {
             val filename = NoteNaming.filename(title)
             val path = if (folder.isEmpty()) filename else "$folder/$filename"
