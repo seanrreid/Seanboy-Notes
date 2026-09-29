@@ -1,6 +1,11 @@
 package com.torchcodelab.seanboy.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material.icons.filled.Delete
@@ -57,7 +62,6 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -500,32 +504,74 @@ private fun SettingsScreen(vm: NotesViewModel, onBack: () -> Unit) {
     var region by rememberSaveable { mutableStateOf(existing?.region ?: "auto") }
     var accessKey by rememberSaveable { mutableStateOf(existing?.accessKeyID ?: "") }
     var secret by rememberSaveable { mutableStateOf(existing?.secretAccessKey ?: "") }
+    var showSecret by rememberSaveable { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
     val sync by vm.sync.collectAsState()
     BackHandler(onBack = onBack)
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Remove sync credentials?") },
+            text = { Text("Sync stops on this device. Your notes stay here and in the bucket.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    vm.clearCredentials()
+                    endpoint = ""; bucket = ""; region = "auto"; accessKey = ""; secret = ""
+                }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
+        )
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Sync settings") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to notes")
+                    }
+                },
             )
         },
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 "Point Seanboy at your own R2 (or any S3) bucket. Credentials are stored encrypted on this device only.",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
             )
-            Field("Endpoint (https://<account>.r2.cloudflarestorage.com)", endpoint) { endpoint = it }
-            Field("Bucket", bucket) { bucket = it }
-            Field("Region", region) { region = it }
-            Field("Access Key ID", accessKey) { accessKey = it }
-            Field("Secret Access Key", secret) { secret = it }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SettingsField("Endpoint", endpoint, hint = "https://<account>.r2.cloudflarestorage.com",
+                                  keyboardType = KeyboardType.Uri) { endpoint = it }
+                    SettingsField("Bucket", bucket) { bucket = it }
+                    SettingsField("Region", region, hint = "auto") { region = it }
+                    SettingsField("Access key ID", accessKey) { accessKey = it }
+                    SettingsField(
+                        "Secret access key", secret,
+                        keyboardType = KeyboardType.Password,
+                        hidden = !showSecret,
+                        trailing = {
+                            TextButton(onClick = { showSecret = !showSecret }) { Text(if (showSecret) "Hide" else "Show") }
+                        },
+                    ) { secret = it }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = {
                     vm.saveCredentials(
                         com.torchcodelab.seanboy.core.S3Config(
                             endpoint = endpoint, bucket = bucket,
@@ -534,21 +580,58 @@ private fun SettingsScreen(vm: NotesViewModel, onBack: () -> Unit) {
                         ),
                     )
                 }) { Text("Save") }
-                TextButton(onClick = vm::syncNow) { Text("Sync now") }
-                TextButton(onClick = vm::clearCredentials) { Text("Clear") }
+                FilledTonalButton(onClick = vm::syncNow, enabled = sync !is SyncStatus.Syncing) { Text("Sync now") }
+                Spacer(Modifier.weight(1f))
+                if (existing != null || sync != SyncStatus.NotConfigured) {
+                    TextButton(onClick = { confirmClear = true }) {
+                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
-            SyncStatusLine(sync)
+            Surface(
+                color = if (sync is SyncStatus.Failed) MaterialTheme.colorScheme.errorContainer
+                        else MaterialTheme.colorScheme.surfaceContainer,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(horizontal = 4.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (sync is SyncStatus.Syncing) {
+                        CircularProgressIndicator(Modifier.padding(start = 12.dp).size(16.dp), strokeWidth = 2.dp)
+                    }
+                    SyncStatusLine(sync)
+                }
+            }
         }
     }
 }
 
+/** Filled, rounded, borderless field — same family as the search pill. */
 @Composable
-private fun Field(label: String, value: String, onValueChange: (String) -> Unit) {
-    OutlinedTextField(
+private fun SettingsField(
+    label: String,
+    value: String,
+    hint: String? = null,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    hidden: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
+    onValueChange: (String) -> Unit,
+) {
+    TextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        placeholder = hint?.let { { Text(it) } },
         singleLine = true,
+        visualTransformation = if (hidden) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, autoCorrectEnabled = false),
+        trailingIcon = trailing,
+        shape = RoundedCornerShape(12.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
         modifier = Modifier.fillMaxWidth(),
     )
 }
