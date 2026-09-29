@@ -247,4 +247,57 @@ class NoteStoreTest {
         assertEquals("v2", store.note(note.id)?.body)
         assertFalse(File(directory, "Mobile.md").exists())
     }
+
+    @Test
+    fun renameMovesTheFile() {
+        val store = makeStore()
+        val note = store.create(title = "Draft", folder = "Journal")
+        val result = store.rename(note.id, "  Final  ")
+        assertEquals("Journal/Final.md", (result as NoteStore.RenameResult.Renamed).note.relativePath)
+        assertFalse(File(directory, "Journal/Draft.md").exists())
+        assertTrue(File(directory, "Journal/Final.md").exists())
+    }
+
+    @Test
+    fun renameOntoAnotherNoteIsAClashAndMovesNothing() {
+        val store = makeStore()
+        store.create(title = "Groceries", body = "milk")
+        val note = store.create(title = "Draft", body = "eggs")
+        assertEquals(NoteStore.RenameResult.Clash("Groceries"), store.rename(note.id, "groceries"))
+        assertEquals("Draft", store.note(note.id)?.title)
+        assertEquals("milk", store.noteAtPath("Groceries.md")?.body)
+        assertTrue(File(directory, "Draft.md").exists())
+    }
+
+    @Test
+    fun renameClashIsPerFolder() {
+        val store = makeStore()
+        store.create(title = "Ideas", folder = "Projects")
+        val note = store.create(title = "Draft")
+        assertTrue(store.rename(note.id, "Ideas") is NoteStore.RenameResult.Renamed)
+    }
+
+    @Test
+    fun blankOrSameTitleRenameIsUnchanged() {
+        val store = makeStore()
+        val note = store.create(title = "Draft")
+        assertEquals(NoteStore.RenameResult.Unchanged, store.rename(note.id, "   "))
+        assertEquals(NoteStore.RenameResult.Unchanged, store.rename(note.id, "Draft "))
+        assertEquals("Draft", store.note(note.id)?.title)
+    }
+
+    @Test
+    fun caseOnlyRenameIsNotAClashWithItself() {
+        val store = makeStore()
+        val note = store.create(title = "readme")
+        assertTrue(store.rename(note.id, "README") is NoteStore.RenameResult.Renamed)
+        assertEquals("README", store.note(note.id)?.title)
+    }
+
+    @Test
+    fun blankTitleCreatesUntitled() {
+        val store = makeStore()
+        assertEquals("Untitled", store.create(title = "").title)
+        assertEquals("Untitled 2", store.create(title = " ").title)
+    }
 }

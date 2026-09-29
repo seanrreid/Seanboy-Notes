@@ -1,6 +1,11 @@
 package com.torchcodelab.seanboy.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material.icons.filled.Delete
@@ -377,11 +382,21 @@ private fun NoteCard(note: Note, showFolder: Boolean, onClick: () -> Unit) {
 @Composable
 private fun EditorScreen(vm: NotesViewModel, note: Note) {
     // Local edit state keyed to the note so switching notes resets the fields.
-    var title by remember(note.id) { mutableStateOf(note.title) }
-    var body by remember(note.id) { mutableStateOf(note.body) }
+    var title by remember(note.id) { mutableStateOf(vm.displayedTitle(note)) }
+    var body by remember(note.id) { mutableStateOf(TextFieldValue(note.body)) }
     var confirmDelete by remember(note.id) { mutableStateOf(false) }
-    val links = remember(body) { WikiLinkParser.linkedTitles(body) }
-    val backlinks = remember(note.id, body) { vm.backlinks(note) }
+    val links = remember(body.text) { WikiLinkParser.linkedTitles(body.text) }
+    val backlinks = remember(note.id, body.text) { vm.backlinks(note) }
+    val clash by vm.titleClash.collectAsState()
+    val titleWarning = clash?.takeIf { it.noteId == note.id }
+        ?.let { "A note named “${it.existingTitle}” already exists in this folder." }
+    val titleFocus = remember { FocusRequester() }
+    val bodyFocus = remember { FocusRequester() }
+    var titleFocused by remember { mutableStateOf(false) }
+    // A new note opens with the cursor in its empty title.
+    LaunchedEffect(note.id) {
+        if (vm.freshNoteId.value == note.id) titleFocus.requestFocus()
+    }
     BackHandler { vm.select(null) }
 
     if (confirmDelete) {
@@ -420,16 +435,28 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
                 .padding(horizontal = 4.dp),
         ) {
             // Title and body are borderless, like the Mac editor: the page is the field.
+            // The title commits after a typing pause, when focus leaves it, and on
+            // Back, note switches, or backgrounding (see NotesViewModel).
             TextField(
                 value = title,
-                onValueChange = { title = it },
-                placeholder = { Text("Title", style = MaterialTheme.typography.headlineSmall) },
+                onValueChange = { title = it; vm.editTitle(note.id, it) },
+                placeholder = { Text("Untitled", style = MaterialTheme.typography.headlineSmall) },
                 textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
                 singleLine = true,
+                isError = titleWarning != null,
+                supportingText = titleWarning?.let { { Text(it) } },
                 colors = borderlessFieldColors(),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { if (title.isNotBlank()) vm.rename(note.id, title) }),
-                modifier = Modifier.fillMaxWidth(),
+                // Enter moves to the start of the body.
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = {
+                    vm.flushPendingTitle()
+                    body = body.copy(selection = TextRange(0))
+                    bodyFocus.requestFocus()
+                }),
+                modifier = Modifier.fillMaxWidth().focusRequester(titleFocus).onFocusChanged {
+                    if (titleFocused && !it.isFocused) vm.flushPendingTitle()
+                    titleFocused = it.isFocused
+                },
             )
             Text(
                 listOfNotNull(note.folder.ifEmpty { null }, editedLabel(note)).joinToString("  ·  "),
@@ -439,11 +466,14 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
             )
             TextField(
                 value = body,
-                onValueChange = { body = it; vm.updateBody(note.id, it) },
+                onValueChange = {
+                    if (it.text != body.text) vm.updateBody(note.id, it.text)
+                    body = it
+                },
                 placeholder = { Text("Start writing…") },
                 textStyle = MaterialTheme.typography.bodyLarge,
                 colors = borderlessFieldColors(),
-                modifier = Modifier.fillMaxWidth().weight(1f),
+                modifier = Modifier.fillMaxWidth().weight(1f).focusRequester(bodyFocus),
             )
             if (links.isNotEmpty() || backlinks.isNotEmpty()) {
                 Surface(
