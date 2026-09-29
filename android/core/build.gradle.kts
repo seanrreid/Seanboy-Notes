@@ -29,4 +29,7 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnit()
+    // Platform-neutral fixtures shared with the Mac port (repo-root shared/fixtures).
+    systemProperty("seanboy.fixtures", rootProject.projectDir.resolve("../shared/fixtures").canonicalPath)
+    inputs.dir(rootProject.projectDir.resolve("../shared/fixtures"))
 }
