@@ -12,9 +12,9 @@ round-trip cleanly between every device.
 **Status: engine complete + functional UI.** The `:core` engine — note
 document format, local `NoteStore`, tombstones, `[[wiki links]]`, search, SigV4
 signing, the three-way `SyncPlanner`, the S3 client, and the `SyncEngine`
-orchestrator — is fully ported from the Mac and covered by **67 passing JVM
+orchestrator — is fully ported from the Mac and covered by **73 passing JVM
 tests** (`./gradlew :core:test`). The app module wires it into a Compose UI
-(searchable notes list, editor with backlinks and wiki-link navigation,
+(folder browsing with breadcrumbs plus global search, editor with backlinks and wiki-link navigation,
 encrypted sync settings) and builds to an installable debug APK
 (`./gradlew :app:assembleDebug`). See [`docs/PRD-android-v1.md`](../docs/PRD-android-v1.md)
 for the full milestone plan.
@@ -66,23 +66,23 @@ Run the unit tests (once there are any beyond the skeleton):
 ## Layout
 
 - `app/` — the Compose application module: `MainActivity` (single-Activity
-  host), the Material3 theme, `NotesViewModel`, the `SeanboyApp` UI (list +
-  search, editor with backlinks, sync settings), and `CredentialStore`
+  host), the Material3 theme, `NotesViewModel`, the `SeanboyApp` UI (folder
+  browsing + search, editor with backlinks, sync settings), and `CredentialStore`
   (EncryptedSharedPreferences).
 - `core/` — a pure-Kotlin, Android-free engine module mirroring
   `mac/Sources/SeanboyCore`: `NoteDocument`/`Note`, `NoteStore`,
-  `TombstoneStore`, `WikiLinkParser`, `SearchService`, `SigV4`, `S3Client`,
+  `TombstoneStore`, `WikiLinkParser`, `SearchService`, `FolderListing`, `SigV4`, `S3Client`,
   the three-way `SyncPlanner` + `SyncState`, and the `SyncEngine` orchestrator.
-  JVM-unit-tested (67 tests, incl. AWS SigV4 vectors and MockWebServer sync
+  JVM-unit-tested (73 tests, incl. AWS SigV4 vectors and MockWebServer sync
   round-trips).
 - `gradle/libs.versions.toml` — the version catalog (AGP, Kotlin, Compose BOM,
   OkHttp, kotlinx.serialization).
 
 ## What's not done yet
 
-The Mac's richer touches are follow-ups: a collapsible folder **tree** in the
-sidebar (the list is flat + search for now), live Markdown **styling** in the
-editor (plain text field today), inline tap-to-follow wiki links (shown as a
+The Mac's richer touches are follow-ups: the Editor v4 inline title and live
+Markdown **styling** in the editor (plain text field today; see
+[`docs/PRD-editor-v4.md`](../docs/PRD-editor-v4.md)), inline tap-to-follow wiki links (shown as a
 Links/Backlinks button row instead), debounced-after-edit sync tuning, and a
 QR credential handoff. None change the data model or bucket format.
 
