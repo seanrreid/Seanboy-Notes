@@ -172,7 +172,7 @@ object MarkdownSpans {
     }
 
     /** The whole lines (terminators included) touching [range], like `NSString.lineRange(for:)`. */
-    internal fun lineRange(text: String, range: SpanRange): SpanRange {
+    fun lineRange(text: String, range: SpanRange): SpanRange {
         var start = range.location
         while (start > 0) {
             val c = text[start - 1]
