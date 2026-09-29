@@ -138,4 +138,64 @@ class NoteDocumentTest {
         assertNull(parsed.id)
         assertEquals("", parsed.body)
     }
+
+    // MARK: - Properties editing (ported from the Mac's NoteStoreTests)
+
+    private fun noteWith(extras: List<String>) =
+        Note.fromTitle(title = "Daily", body = "body").copy(extraFrontmatter = extras)
+
+    private fun obsidianNote() = noteWith(listOf("tags:", "  - journal", "aliases: [JRN]", "", "cssclass: wide"))
+
+    @Test
+    fun propertiesUnchangedTextIsByteFaithful() {
+        val note = noteWith(listOf("tags: x", "", ""))
+        val text = NoteDocument.propertiesText(note)
+        // Trailing blank lines from the file survive when nothing was edited.
+        assertEquals(NoteDocument.FrontmatterEdit.Accepted(listOf("tags: x", "", "")), NoteDocument.editedFrontmatter(text, note))
+    }
+
+    @Test
+    fun propertiesEditAcceptsNormalYaml() {
+        val edited = "tags:\n  - journal\n  - ideas\naliases: [JRN]\nstatus: draft\n\n"
+        assertEquals(
+            NoteDocument.FrontmatterEdit.Accepted(listOf("tags:", "  - journal", "  - ideas", "aliases: [JRN]", "status: draft")),
+            NoteDocument.editedFrontmatter(edited, obsidianNote()),
+        )
+    }
+
+    @Test
+    fun propertiesEditCanClearEverything() {
+        assertEquals(NoteDocument.FrontmatterEdit.Accepted(emptyList()), NoteDocument.editedFrontmatter("", obsidianNote()))
+    }
+
+    @Test
+    fun propertiesEditRejectsBlockTerminator() {
+        val result = NoteDocument.editedFrontmatter("tags: x\n---\nmore: y", obsidianNote())
+        assertTrue(result is NoteDocument.FrontmatterEdit.Rejected && "---" in result.lines)
+    }
+
+    @Test
+    fun propertiesEditRejectsManagedKeys() {
+        val note = obsidianNote()
+        for (line in listOf(
+            "created: 2026-01-01T00:00:00Z", "seanboy-id: ${UUID.randomUUID()}", "deleted: true", "title: Sneaky",
+        )) {
+            assertEquals(line, NoteDocument.FrontmatterEdit.Rejected(listOf(line)), NoteDocument.editedFrontmatter("tags: x\n$line", note))
+        }
+    }
+
+    @Test
+    fun propertiesEditKeepsForeignValuesOfManagedNames() {
+        // Values Seanboy can't parse as its own stay the user's.
+        assertEquals(
+            NoteDocument.FrontmatterEdit.Accepted(listOf("created: last spring", "id: zettel-42")),
+            NoteDocument.editedFrontmatter("created: last spring\nid: zettel-42", obsidianNote()),
+        )
+    }
+
+    @Test
+    fun propertyKeys() {
+        assertEquals(listOf("tags", "aliases", "cssclass"), NoteDocument.propertyKeys(obsidianNote().extraFrontmatter))
+        assertEquals(listOf("a"), NoteDocument.propertyKeys(listOf("# comment: no", "a: 1", "a: 2", "  b: nested")))
+    }
 }

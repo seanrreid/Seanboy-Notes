@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.torchcodelab.seanboy.core.FolderListing
 import com.torchcodelab.seanboy.core.Note
+import com.torchcodelab.seanboy.core.NoteDocument
 import com.torchcodelab.seanboy.core.NoteStore
 import com.torchcodelab.seanboy.core.S3Config
 import com.torchcodelab.seanboy.core.SearchService
@@ -104,11 +105,12 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setQuery(value: String) { _query.value = value }
 
-    /** Opens a note (or returns to the list with null), committing any typed title first. */
+    /** Opens a note (or returns to the list with null), committing any typed title or properties first. */
     fun select(id: UUID?) {
         if (id == _selectedId.value) return
-        flushPendingTitle()
+        flushPendingEdits()
         _titleClash.value = null
+        _propertiesRejection.value = null
         if (_freshNoteId.value != id) _freshNoteId.value = null
         _selectedId.value = id
     }
@@ -181,6 +183,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
             titleCommitJob?.cancel()
             pendingTitle = null
         }
+        if (pendingProperties?.first == id) pendingProperties = null
         store.delete(id)
         if (_selectedId.value == id) select(null)
         maybeSync()
@@ -196,8 +199,48 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         if (existing == null) maybeSync()
     }
 
-    override fun onCleared() {
+    /** Applies every pending inline edit (title, properties) now. */
+    fun flushPendingEdits() {
         flushPendingTitle()
+        flushPendingProperties()
+    }
+
+    // MARK: - Properties (unmanaged frontmatter)
+
+    /** Properties text that couldn't be saved as written; shown with a warning until fixed. */
+    data class PropertiesRejection(val noteId: UUID, val attempted: String, val lines: List<String>)
+    private val _propertiesRejection = MutableStateFlow<PropertiesRejection?>(null)
+    val propertiesRejection: StateFlow<PropertiesRejection?> = _propertiesRejection.asStateFlow()
+    private var pendingProperties: Pair<UUID, String>? = null
+
+    fun propertiesText(note: Note): String {
+        _propertiesRejection.value?.let { if (it.noteId == note.id) return it.attempted }
+        return NoteDocument.propertiesText(note)
+    }
+
+    /** Called on every keystroke in the Properties editor; saved on focus-out and the title's flush points. */
+    fun editProperties(id: UUID, text: String) {
+        pendingProperties = id to text
+    }
+
+    fun flushPendingProperties() {
+        val (id, text) = pendingProperties ?: return
+        pendingProperties = null
+        val note = store.note(id) ?: return
+        when (val result = NoteDocument.editedFrontmatter(text, note)) {
+            is NoteDocument.FrontmatterEdit.Accepted -> {
+                _propertiesRejection.value = null
+                if (result.lines == note.extraFrontmatter) return
+                store.update(note.copy(extraFrontmatter = result.lines))
+                maybeSync()
+            }
+            is NoteDocument.FrontmatterEdit.Rejected ->
+                _propertiesRejection.value = PropertiesRejection(id, attempted = text, lines = result.lines)
+        }
+    }
+
+    override fun onCleared() {
+        flushPendingEdits()
     }
 
     // MARK: - Sync
