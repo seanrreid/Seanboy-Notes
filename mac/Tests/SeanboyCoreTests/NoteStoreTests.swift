@@ -34,6 +34,20 @@ final class NoteDocumentTests: XCTestCase {
         XCTAssertEqual(parsed.body, "# Just Markdown\n\nNo header at all.")
     }
 
+    func testUnparseableDuplicateCreatedDoesNotEraseValidOne() {
+        let text = "---\ncreated: 2026-07-17T12:00:00Z\ncreated: last spring\nmodified: 2026-07-18T08:00:00Z\nmodified: later\n---\n\nBody"
+        let parsed = NoteDocument.parse(text)
+        XCTAssertNotNil(parsed.created)
+        XCTAssertNotNil(parsed.modified)
+        XCTAssertEqual(parsed.extraFrontmatter, ["created: last spring", "modified: later"])
+    }
+
+    func testFirstValidCreatedWins() {
+        let text = "---\ncreated: 2026-07-17T12:00:00Z\ncreated: 2026-01-01T00:00:00Z\n---\n\nBody"
+        let parsed = NoteDocument.parse(text)
+        XCTAssertEqual(parsed.created, NoteDocument.parseDate("2026-07-17T12:00:00Z"))
+    }
+
     func testObsidianFrontmatterPreservedVerbatim() {
         let obsidian = """
         ---

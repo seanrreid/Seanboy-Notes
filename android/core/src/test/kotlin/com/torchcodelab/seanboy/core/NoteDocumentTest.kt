@@ -49,6 +49,22 @@ class NoteDocumentTest {
     }
 
     @Test
+    fun unparseableDuplicateCreatedDoesNotEraseValidOne() {
+        val text = "---\ncreated: 2026-07-17T12:00:00Z\ncreated: last spring\nmodified: 2026-07-18T08:00:00Z\nmodified: later\n---\n\nBody"
+        val parsed = NoteDocument.parse(text)
+        assertTrue(parsed.created != null)
+        assertTrue(parsed.modified != null)
+        assertEquals(listOf("created: last spring", "modified: later"), parsed.extraFrontmatter)
+    }
+
+    @Test
+    fun firstValidCreatedWins() {
+        val text = "---\ncreated: 2026-07-17T12:00:00Z\ncreated: 2026-01-01T00:00:00Z\n---\n\nBody"
+        val parsed = NoteDocument.parse(text)
+        assertEquals(NoteDocument.parseDate("2026-07-17T12:00:00Z"), parsed.created)
+    }
+
+    @Test
     fun obsidianFrontmatterPreservedVerbatim() {
         val obsidian = """
             ---

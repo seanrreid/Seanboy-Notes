@@ -111,13 +111,17 @@ object NoteDocument {
                         parsed.extraFrontmatter.add(line)
                     }
                 }
+                // First valid date wins; an unparseable duplicate is kept as a
+                // foreign line instead of overwriting the valid one with null.
                 "created" -> {
-                    parsed.created = parseDate(value)
-                    if (parsed.created == null) parsed.extraFrontmatter.add(line)
+                    val date = parseDate(value)
+                    if (date == null) parsed.extraFrontmatter.add(line)
+                    else if (parsed.created == null) parsed.created = date
                 }
                 "modified" -> {
-                    parsed.modified = parseDate(value)
-                    if (parsed.modified == null) parsed.extraFrontmatter.add(line)
+                    val date = parseDate(value)
+                    if (date == null) parsed.extraFrontmatter.add(line)
+                    else if (parsed.modified == null) parsed.modified = date
                 }
                 "deleted" -> parsed.deleted = value == "true"
                 "title" -> parsed.legacyTitle = value
