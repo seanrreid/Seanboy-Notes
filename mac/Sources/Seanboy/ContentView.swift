@@ -127,7 +127,8 @@ struct NoteDetailView: View {
                 propertiesWarning: model.propertiesWarning(for: note.id),
                 onPropertiesEdit: { model.editProperties($0, for: note.id) },
                 onPropertiesCommit: { model.flushPendingProperties() },
-                onOpenWikiLink: { model.openNote(titled: $0) }
+                onOpenWikiLink: { model.openNote(titled: $0) },
+                autoLinks: model.autoLinks(for: model.selectedNote ?? note)
             )
 
             backlinksBar

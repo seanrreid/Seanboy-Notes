@@ -27,6 +27,7 @@ data class LivePreviewColors(
     val codeBackground: Int,
     val highlight: Int,
     val rule: Int,
+    val autoLink: Int,
 )
 
 /**
@@ -51,36 +52,45 @@ object LivePreviewSpans {
         }
     }
 
-    fun apply(text: Spannable, styles: List<LivePreview.Styled>, colors: LivePreviewColors, density: Float) {
+    /** [layout] is the editor's current layout, for spans that draw by position. */
+    fun apply(
+        text: Spannable,
+        styles: List<LivePreview.Styled>,
+        colors: LivePreviewColors,
+        density: Float,
+        layout: () -> Layout?,
+    ) {
         for ((style, range) in styles) {
-            for (span in spansFor(style, colors, density)) {
+            for (span in spansFor(style, colors, density, layout)) {
                 text.setSpan(span, range.location, range.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
     }
 
-    private fun spansFor(style: Style, colors: LivePreviewColors, density: Float): List<Any> = when (style) {
-        is Style.Heading -> listOf(
-            Scale(headingScale[(style.level - 1).coerceIn(0, 5)]), Bold(), Color(colors.accent),
-        )
-        Style.Bold -> listOf(Bold())
-        Style.Italic -> listOf(Italic())
-        Style.Strikethrough -> listOf(Strike())
-        Style.Highlight -> listOf(Background(colors.highlight))
-        Style.Monospace -> listOf(Monospace())
-        Style.InlineCode -> listOf(Color(colors.codeText), Background(colors.codeBackground))
-        Style.CodeBlock -> listOf(CodeBlockSpan(colors.codeBackground, density))
-        is Style.Link -> listOf(LinkSpan(style.target, style.isWikiLink, colors.accent))
-        is Style.Quote -> listOf(QuoteSpan(colors.accent, style.markerShown, density))
-        Style.QuoteText -> listOf(Color(colors.secondary))
-        Style.Rule -> listOf(RuleSpan(colors.rule, density))
-        Style.Hidden -> listOf(HiddenSpan())
-        Style.Faded -> listOf(Color(colors.faded))
-        Style.Tinted -> listOf(Color(colors.accent))
-        Style.Bullet -> listOf(BulletGlyphSpan(colors.accent))
-        is Style.Checkbox -> listOf(CheckboxSpan(style.checked, colors.accent, density))
-        Style.DoneTask -> listOf(Strike(), Color(colors.secondary))
-    }
+    private fun spansFor(style: Style, colors: LivePreviewColors, density: Float, layout: () -> Layout?): List<Any> =
+        when (style) {
+            is Style.Heading -> listOf(
+                Scale(headingScale[(style.level - 1).coerceIn(0, 5)]), Bold(), Color(colors.accent),
+            )
+            Style.Bold -> listOf(Bold())
+            Style.Italic -> listOf(Italic())
+            Style.Strikethrough -> listOf(Strike())
+            Style.Highlight -> listOf(Background(colors.highlight))
+            Style.Monospace -> listOf(Monospace())
+            Style.InlineCode -> listOf(Color(colors.codeText), Background(colors.codeBackground))
+            Style.CodeBlock -> listOf(CodeBlockSpan(colors.codeBackground, density))
+            is Style.Link -> listOf(LinkSpan(style.target, style.isWikiLink, colors.accent))
+            is Style.Quote -> listOf(QuoteSpan(colors.accent, style.markerShown, density))
+            Style.QuoteText -> listOf(Color(colors.secondary))
+            Style.Rule -> listOf(RuleSpan(colors.rule, density))
+            Style.Hidden -> listOf(HiddenSpan())
+            Style.Faded -> listOf(Color(colors.faded))
+            Style.Tinted -> listOf(Color(colors.accent))
+            Style.Bullet -> listOf(BulletGlyphSpan(colors.accent))
+            is Style.Checkbox -> listOf(CheckboxSpan(style.checked, colors.accent, density))
+            Style.DoneTask -> listOf(Strike(), Color(colors.secondary))
+            is Style.AutoLink -> listOf(AutoLinkSpan(style.title, colors.autoLink, density, layout))
+        }
 
     // MARK: - Character styles
 
@@ -223,6 +233,49 @@ object LivePreviewSpans {
     }
 
     // MARK: - Line decorations
+
+    /**
+     * An auto-link: a dotted underline under text that matches another note's
+     * title. Drawn as a line background (Android has no dotted underline), using
+     * the layout's selection path so it follows wrapped lines and styled text.
+     */
+    class AutoLinkSpan(
+        val title: String,
+        private val color: Int,
+        private val density: Float,
+        private val layout: () -> Layout?,
+    ) : LineBackgroundSpan, LivePreviewSpan {
+        private val path = android.graphics.Path()
+        private val bounds = RectF()
+
+        override fun drawBackground(
+            canvas: Canvas, paint: Paint, left: Int, right: Int, top: Int, baseline: Int, bottom: Int,
+            text: CharSequence, start: Int, end: Int, lineNumber: Int,
+        ) {
+            val spanned = text as? Spanned ?: return
+            val layout = layout() ?: return
+            val from = maxOf(spanned.getSpanStart(this), start)
+            val to = minOf(spanned.getSpanEnd(this), end)
+            if (from >= to) return
+            path.reset()
+            layout.getSelectionPath(from, to, path)
+            path.computeBounds(bounds, true)
+            if (bounds.width() <= 0) return
+            val oldColor = paint.color
+            val oldStyle = paint.style
+            paint.color = color
+            paint.style = Paint.Style.FILL
+            val y = baseline + 2.5f * density
+            val radius = 0.9f * density
+            var x = bounds.left + radius
+            while (x <= bounds.right - radius) {
+                canvas.drawCircle(x, y, radius, paint)
+                x += 3.5f * density
+            }
+            paint.color = oldColor
+            paint.style = oldStyle
+        }
+    }
 
     /** Code block background and indent. */
     private class CodeBlockSpan(private val color: Int, private val density: Float) :

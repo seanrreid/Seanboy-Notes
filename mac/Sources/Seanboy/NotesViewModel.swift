@@ -22,6 +22,13 @@ final class NotesViewModel: ObservableObject {
     }
     @Published private(set) var revision = 0  // bumped on any store change
 
+    /// Auto-links to other notes' titles in the editor (Settings → Editor).
+    @Published var autoLinksEnabled = AppSettings.load().autoLinks ?? true {
+        didSet { AppSettings.setAutoLinks(autoLinksEnabled) }
+    }
+    /// The matcher is rebuilt only when a title or the open note changes, not per keystroke.
+    private var autoLinksCache: (titles: [String], current: String, links: AutoLinks)?
+
     /// A note created blank by ⌘N; its inline title starts empty (showing
     /// the "Untitled" placeholder) until it's renamed or deselected.
     @Published private(set) var freshNoteID: UUID?
@@ -236,6 +243,18 @@ final class NotesViewModel: ObservableObject {
     }
 
     // MARK: - Inline title
+
+    /// The editor's auto-link matcher for `note`: every other note's title,
+    /// or nil when auto-links are off. The same instance comes back until a
+    /// title changes, so the editor only restyles when it must.
+    func autoLinks(for note: Note) -> AutoLinks? {
+        guard autoLinksEnabled else { return nil }
+        let titles = Array(Set(store.activeNotes.map(\.title))).sorted()
+        if let cache = autoLinksCache, cache.titles == titles, cache.current == note.title { return cache.links }
+        let links = AutoLinks(titles: titles, current: note.title)
+        autoLinksCache = (titles, note.title, links)
+        return links
+    }
 
     /// What the inline title field shows for `note`.
     func displayedTitle(for note: Note) -> String {

@@ -1,6 +1,8 @@
 package com.torchcodelab.seanboy.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.material3.Switch
+import com.torchcodelab.seanboy.core.AutoLinks
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
@@ -399,6 +401,12 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
     val links = remember(body) { WikiLinkParser.linkedTitles(body) }
     val backlinks = remember(note.id, body) { vm.backlinks(note) }
     val clash by vm.titleClash.collectAsState()
+    val titles by vm.noteTitles.collectAsState()
+    val autoLinksOn by vm.autoLinksEnabled.collectAsState()
+    // Rebuilt only when a title, this note's name, or the setting changes.
+    val autoLinks = remember(titles, note.title, autoLinksOn) {
+        if (autoLinksOn) AutoLinks(titles, current = note.title) else null
+    }
     val titleWarning = clash?.takeIf { it.noteId == note.id }
         ?.let { "A note named “${it.existingTitle}” already exists in this folder." }
     val titleFocus = remember { FocusRequester() }
@@ -481,6 +489,7 @@ private fun EditorScreen(vm: NotesViewModel, note: Note) {
                     onChange = { body = it; vm.updateBody(note.id, it) },
                     onOpenWikiLink = vm::openWikiLink,
                     onReady = { bodyEditor = it },
+                    autoLinks = autoLinks,
                     modifier = Modifier.fillMaxWidth().weight(1f),
                 )
             }
@@ -640,7 +649,7 @@ private fun SettingsScreen(vm: NotesViewModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Sync settings") },
+                title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to notes")
@@ -711,6 +720,35 @@ private fun SettingsScreen(vm: NotesViewModel, onBack: () -> Unit) {
                         CircularProgressIndicator(Modifier.padding(start = 12.dp).size(16.dp), strokeWidth = 2.dp)
                     }
                     SyncStatusLine(sync)
+                }
+            }
+            val autoLinksOn by vm.autoLinksEnabled.collectAsState()
+            Text(
+                "Editor",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 12.dp),
+            )
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    Modifier.clickable { vm.setAutoLinksEnabled(!autoLinksOn) }.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Link note titles automatically", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Text matching another note's title gets a dotted underline; tap it to open that note. " +
+                                "Display only — nothing is added to your notes.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.size(12.dp))
+                    Switch(checked = autoLinksOn, onCheckedChange = vm::setAutoLinksEnabled)
                 }
             }
         }

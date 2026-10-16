@@ -38,6 +38,8 @@ object LivePreview {
         data object Tinted : Style
         /** A list marker character drawn as `•` (the file keeps `-`, `*`, or `+`). */
         data object Bullet : Style
+        /** Text matching another note's title: a subtle dotted underline that opens [title]. */
+        data class AutoLink(val title: String) : Style
         /** A task's box character, drawn as a tappable checkbox. */
         data class Checkbox(val checked: Boolean) : Style
         /** A done task's text: struck through and secondary. */
@@ -50,8 +52,14 @@ object LivePreview {
      * The styles for [spans] (from [MarkdownSpans.parse] over [text]), in the
      * order to apply them: later styles win where they overlap. [revealed] is
      * the range of lines whose markers stay visible, or null to render all.
+     * [autoLinks] (from [AutoLinks.find]) are underlined on every line.
      */
-    fun styles(text: String, spans: List<MarkdownSpan>, revealed: SpanRange?): List<Styled> {
+    fun styles(
+        text: String,
+        spans: List<MarkdownSpan>,
+        revealed: SpanRange?,
+        autoLinks: List<AutoLink> = emptyList(),
+    ): List<Styled> {
         val out = mutableListOf<Styled>()
         fun add(style: Style, range: SpanRange) { out += Styled(style, range) }
         for (span in spans) {
@@ -123,6 +131,7 @@ object LivePreview {
                 }
             }
         }
+        for (link in autoLinks) add(Style.AutoLink(link.title), link.range)
         return out.filter { it.range.length > 0 }
     }
 

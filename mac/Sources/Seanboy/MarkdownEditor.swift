@@ -23,6 +23,8 @@ struct MarkdownEditor: NSViewRepresentable {
     var onPropertiesEdit: (String) -> Void = { _ in }
     var onPropertiesCommit: () -> Void = {}
     var onOpenWikiLink: (String) -> Void
+    /// Other notes' titles to underline (⌘-click opens them), or nil when off.
+    var autoLinks: AutoLinks? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -41,7 +43,11 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.onFocusChange = { [weak coordinator = context.coordinator] in
             coordinator?.updateRevealedLines()
         }
+        textView.onOpenAutoLink = { [weak coordinator = context.coordinator] in
+            coordinator?.parent.onOpenWikiLink($0)
+        }
         textView.string = text
+        context.coordinator.autoLinks = autoLinks
         context.coordinator.styleAll()
         textView.textStorage?.delegate = context.coordinator
 
@@ -84,6 +90,11 @@ struct MarkdownEditor: NSViewRepresentable {
         if textView.string != text, !textView.hasMarkedText() {
             context.coordinator.applyExternalText(text)
         }
+        // A title was added, renamed, or removed, or the setting changed.
+        if context.coordinator.autoLinks !== autoLinks, !textView.hasMarkedText() {
+            context.coordinator.autoLinks = autoLinks
+            context.coordinator.styleAll()
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
@@ -94,6 +105,8 @@ struct MarkdownEditor: NSViewRepresentable {
         /// Lines whose markers are visible: the cursor/selection lines while
         /// the editor has focus, else nil (everything rendered).
         private(set) var revealedLines: NSRange?
+        /// Other notes' titles to underline; see `MarkdownEditor.autoLinks`.
+        var autoLinks: AutoLinks?
         let layout = LivePreviewLayout()
 
         init(_ parent: MarkdownEditor) {
@@ -121,7 +134,7 @@ struct MarkdownEditor: NSViewRepresentable {
             revealedLines = currentRevealedLines()
             storage.beginEditing()
             MarkdownStyler.restyle(storage, around: NSRange(location: 0, length: storage.length),
-                                   revealing: revealedLines)
+                                   revealing: revealedLines, autoLinks: autoLinks)
             storage.endEditing()
         }
 
@@ -146,7 +159,7 @@ struct MarkdownEditor: NSViewRepresentable {
             for lines in [old, new].compactMap({ $0 }) {
                 let clamped = NSRange(location: min(lines.location, storage.length),
                                       length: min(lines.length, storage.length - min(lines.location, storage.length)))
-                MarkdownStyler.restyle(storage, around: clamped, revealing: new)
+                MarkdownStyler.restyle(storage, around: clamped, revealing: new, autoLinks: autoLinks)
             }
             storage.endEditing()
         }
@@ -175,9 +188,9 @@ struct MarkdownEditor: NSViewRepresentable {
                 fenceLineCount = fences
                 MarkdownStyler.restyle(storage, around: NSRange(
                     location: edited.location, length: storage.length - edited.location),
-                    revealing: revealedLines)
+                    revealing: revealedLines, autoLinks: autoLinks)
             } else {
-                MarkdownStyler.restyle(storage, around: edited, revealing: revealedLines)
+                MarkdownStyler.restyle(storage, around: edited, revealing: revealedLines, autoLinks: autoLinks)
             }
         }
 
@@ -465,9 +478,17 @@ final class MarkdownTextView: NSTextView {
                       width: size, height: size)
     }
 
-    /// Clicking a rendered checkbox toggles it without moving the cursor.
+    /// ⌘-click on an auto-linked title opens that note.
+    var onOpenAutoLink: ((String) -> Void)?
+
+    /// Clicking a rendered checkbox toggles it without moving the cursor;
+    /// ⌘-clicking an auto-linked title opens that note.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if event.modifierFlags.contains(.command), let title = autoLinkTitle(at: point) {
+            onOpenAutoLink?(title)
+            return
+        }
         if let index = checkboxIndex(at: point) {
             let selection = selectedRange()
             if perform(ListEditing.toggleTask(string, at: index)) {
@@ -476,6 +497,19 @@ final class MarkdownTextView: NSTextView {
             }
         }
         super.mouseDown(with: event)
+    }
+
+    /// The auto-linked title under `point`, if the point is on its text.
+    func autoLinkTitle(at point: NSPoint) -> String? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return nil }
+        let origin = textContainerOrigin
+        let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let glyph = layoutManager.glyphIndex(for: local, in: textContainer)
+        guard layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
+            .contains(local) else { return nil }
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard index < storage.length else { return nil }
+        return storage.attribute(.livePreviewAutoLink, at: index, effectiveRange: nil) as? String
     }
 
     private func checkboxIndex(at point: NSPoint) -> Int? {

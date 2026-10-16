@@ -124,4 +124,14 @@ class LivePreviewTest {
             styled("- [x]"),
         )
     }
+
+    @Test
+    fun autoLinksAreUnderlinedOnEveryLine() {
+        val text = "see Recipes\nand Recipes"
+        val spans = MarkdownSpans.parse(text)
+        val links = AutoLinks(listOf("Recipes")).find(text, spans)
+        val styles = LivePreview.styles(text, spans, revealed = lineOf(text, 0), autoLinks = links)
+            .map { it.style to text.substring(it.range.location, it.range.end) }
+        assertEquals(listOf(Style.AutoLink("Recipes") to "Recipes", Style.AutoLink("Recipes") to "Recipes"), styles)
+    }
 }
