@@ -89,12 +89,20 @@ public enum NoteDocument {
                     // Foreign id (non-UUID, or ours already found) — theirs, keep it.
                     parsed.extraFrontmatter.append(line)
                 }
+            // First valid date wins; an unparseable duplicate is kept as a
+            // foreign line instead of overwriting the valid one with nil.
             case "created":
-                parsed.created = parseDate(value)
-                if parsed.created == nil { parsed.extraFrontmatter.append(line) }
+                if let date = parseDate(value) {
+                    if parsed.created == nil { parsed.created = date }
+                } else {
+                    parsed.extraFrontmatter.append(line)
+                }
             case "modified":
-                parsed.modified = parseDate(value)
-                if parsed.modified == nil { parsed.extraFrontmatter.append(line) }
+                if let date = parseDate(value) {
+                    if parsed.modified == nil { parsed.modified = date }
+                } else {
+                    parsed.extraFrontmatter.append(line)
+                }
             case "deleted":
                 parsed.deleted = value == "true"
             case "title":
