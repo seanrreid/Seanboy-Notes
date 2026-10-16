@@ -75,6 +75,12 @@ class S3ClientTest {
     }
 
     @Test
+    fun getStripsWeakEtagPrefixSoItMatchesList() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("x").addHeader("ETag", "W/\"abc123\""))
+        assertEquals("abc123", client.get("notes/A.md").etag)
+    }
+
+    @Test
     fun getReturnsBodyAndEtag() {
         server.enqueue(MockResponse().setResponseCode(200).setBody("hello body").addHeader("ETag", "\"abc123\""))
         val result = client.get("notes/A.md")

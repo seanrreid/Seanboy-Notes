@@ -22,6 +22,26 @@ final class SyncStateTests: XCTestCase {
                        1_750_000_000, accuracy: 1)
     }
 
+    func testLoadHealsWeakEtagsSavedByOlderBuilds() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SeanboyTests-\(UUID().uuidString)")
+        let url = directory.appendingPathComponent("syncstate.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let id = UUID()
+        var state = SyncState()
+        state[id] = .init(key: "notes/A.md", etag: "W/\"abc\"", modifiedAt: Date(timeIntervalSince1970: 1_750_000_000))
+        try state.save(to: url)
+
+        XCTAssertEqual(SyncState.load(from: url)[id]?.etag, "abc")
+    }
+
+    func testNormalizeETagStripsWeakPrefixAndQuotes() {
+        XCTAssertEqual(S3Client.normalizeETag("W/\"abc\""), "abc")
+        XCTAssertEqual(S3Client.normalizeETag("\"abc\""), "abc")
+        XCTAssertEqual(S3Client.normalizeETag("abc"), "abc")
+    }
+
     func testMissingFileLoadsEmpty() {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("does-not-exist-\(UUID().uuidString).json")

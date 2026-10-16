@@ -28,8 +28,8 @@ class CredentialStore(context: Context) {
         val secret = prefs.getString(KEY_SECRET, null) ?: return null
         if (endpoint.isBlank() || bucket.isBlank() || accessKey.isBlank() || secret.isBlank()) return null
         return S3Config(
-            endpoint = endpoint,
-            bucket = bucket,
+            endpoint = cleanEndpoint(endpoint),
+            bucket = bucket.trim(),
             region = prefs.getString(KEY_REGION, null)?.ifBlank { "auto" } ?: "auto",
             accessKeyID = accessKey,
             secretAccessKey = secret,
@@ -38,7 +38,7 @@ class CredentialStore(context: Context) {
 
     fun save(config: S3Config) {
         prefs.edit()
-            .putString(KEY_ENDPOINT, config.endpoint.trim())
+            .putString(KEY_ENDPOINT, cleanEndpoint(config.endpoint))
             .putString(KEY_BUCKET, config.bucket.trim())
             .putString(KEY_REGION, config.region.trim())
             .putString(KEY_ACCESS, config.accessKeyID.trim())
@@ -47,6 +47,11 @@ class CredentialStore(context: Context) {
     }
 
     fun clear() = prefs.edit().clear().apply()
+
+    /** Pasted endpoints can carry newlines, quotes or invisible characters; keep the first URL-safe token. */
+    private fun cleanEndpoint(raw: String): String =
+        raw.split(Regex("\\s+")).map { token -> token.filter { it.code in 0x21..0x7E && it != '"' && it != '\'' } }
+            .firstOrNull { it.isNotEmpty() } ?: ""
 
     private companion object {
         const val KEY_ENDPOINT = "endpoint"

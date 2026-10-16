@@ -135,7 +135,7 @@ public final class NoteStore {
             idByPath[existing.relativePath.lowercased()] = nil
             fsModifiedByPath[existing.relativePath] = nil
         }
-        write(note)
+        write(note, mtime: note.modifiedAt)
     }
 
     // MARK: - Disk
@@ -254,12 +254,19 @@ public final class NoteStore {
         return full.hasPrefix(base) ? String(full.dropFirst(base.count)) : file.lastPathComponent
     }
 
-    private func write(_ note: Note) {
+    /// `mtime` pins the file's modification date to the note's own modified
+    /// time. Remote applies need it: otherwise the write time (now) would
+    /// outrank the frontmatter on the next `reload()` and make every pulled
+    /// note look edited.
+    private func write(_ note: Note, mtime: Date? = nil) {
         let url = fileURL(forPath: note.relativePath)
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try NoteDocument.serialize(note).write(to: url, atomically: true, encoding: .utf8)
+            if let mtime {
+                try? FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
+            }
             notesByID[note.id] = note
             idByPath[note.relativePath.lowercased()] = note.id
             fsModifiedByPath[note.relativePath] = (try? url.resourceValues(
