@@ -42,6 +42,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         /** Typing pause before a title edit renames the file (same as the Mac). */
         const val TITLE_COMMIT_DELAY_MS = 750L
+        const val WAKE_LOCK_TIMEOUT_MS = 10 * 60 * 1000L
     }
 
     private val container = AppContainer(app)
@@ -266,15 +267,30 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         if (container.isSyncConfigured) syncNow()
     }
 
+    /** Keeps the CPU awake for the duration of a sync pass (bounded, so a hang can't drain the battery). */
+    private fun <T> withWakeLock(block: () -> T): T {
+        val power = getApplication<Application>().getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        val lock = power.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "seanboy:sync")
+        lock.acquire(WAKE_LOCK_TIMEOUT_MS)
+        try {
+            return block()
+        } finally {
+            if (lock.isHeld) lock.release()
+        }
+    }
+
     fun syncNow() {
-        val engine = container.syncEngine() ?: run {
+        val engine = runCatching { container.syncEngine() }.getOrElse { e ->
+            _sync.value = SyncStatus.Failed("Check the endpoint URL in Settings (${e.javaClass.simpleName})")
+            return
+        } ?: run {
             _sync.value = SyncStatus.NotConfigured
             return
         }
         if (_sync.value is SyncStatus.Syncing) return
         _sync.value = SyncStatus.Syncing
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { engine.sync() } }
+            val result = withContext(Dispatchers.IO) { withWakeLock { runCatching { engine.sync() } } }
             _notes.value = store.activeNotes
             result
                 .onSuccess { r ->

@@ -153,7 +153,7 @@ class S3Client(
 
         client.newCall(builder.build()).execute().use { response ->
             val bytes = response.body?.bytes() ?: ByteArray(0)
-            val resp = Resp(response.code, response.header("ETag").orEmpty().trim('"'))
+            val resp = Resp(response.code, normalizeETag(response.header("ETag").orEmpty()))
             return when {
                 response.code in 200..299 -> bytes to resp
                 response.code == 412 -> throw S3Error.PreconditionFailed(key ?: path)
@@ -165,6 +165,15 @@ class S3Client(
     }
 
     private fun etagOf(resp: Resp): String = resp.etag
+
+    companion object {
+        /**
+         * GET responses can carry a weak validator (`W/"abc"`, e.g. when the
+         * edge compresses the body) while LIST reports the bare hash. Strip the
+         * weak prefix and quotes so both forms compare equal.
+         */
+        fun normalizeETag(raw: String): String = raw.trim().removePrefix("W/").trim('"')
+    }
 }
 
 // MARK: - XML parsing
@@ -199,7 +208,7 @@ internal object ListResultParser {
                 val value = text.toString().trim()
                 when (qName) {
                     "Key" -> if (inContents) key = value
-                    "ETag" -> if (inContents) etag = value.trim('"')
+                    "ETag" -> if (inContents) etag = S3Client.normalizeETag(value)
                     "Contents" -> { inContents = false; page.objects.add(S3Object(key, etag)) }
                     "NextContinuationToken" -> page.nextContinuationToken = value
                 }

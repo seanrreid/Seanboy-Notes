@@ -27,6 +27,17 @@ class SyncStateTest {
     }
 
     @Test
+    fun loadHealsWeakEtagsSavedByOlderBuilds() {
+        val id = UUID.randomUUID()
+        val file = File.createTempFile("syncstate", ".json")
+        file.deleteOnExit()
+        file.writeText(
+            """{"entries":{"${NoteDocument.uuidString(id)}":{"key":"notes/A.md","etag":"W/\"abc\"","modifiedAt":"2026-01-01T00:00:00Z"}}}""",
+        )
+        assertEquals("abc", SyncState.load(file)[id]?.etag)
+    }
+
+    @Test
     fun missingFileLoadsEmpty() {
         val loaded = SyncState.load(File("/nonexistent/path/syncstate.json"))
         assertEquals(0, loaded.entries.size)

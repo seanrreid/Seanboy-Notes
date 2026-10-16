@@ -22,6 +22,7 @@ class SyncEngineTest {
     private lateinit var stateFile: File
     private lateinit var store: NoteStore
     private lateinit var engine: SyncEngine
+    private lateinit var config: S3Config
 
     @Before
     fun setUp() {
@@ -31,13 +32,11 @@ class SyncEngineTest {
         directory = File(base, "Notes").apply { mkdirs() }
         stateFile = File(base, "syncstate.json")
         store = NoteStore(directory, File(base, "tombstones.json"))
-        val client = S3Client(
-            S3Config(
-                endpoint = server.url("/").toString().trimEnd('/'), bucket = "b",
-                accessKeyID = "AK", secretAccessKey = "SK",
-            ),
+        config = S3Config(
+            endpoint = server.url("/").toString().trimEnd('/'), bucket = "b",
+            accessKeyID = "AK", secretAccessKey = "SK",
         )
-        engine = SyncEngine(store, client, stateFile)
+        engine = SyncEngine(store, S3Client(config), stateFile)
     }
 
     @After
@@ -71,6 +70,46 @@ class SyncEngineTest {
         val saved = SyncState.load(stateFile)
         assertEquals("notes/Hello.md", saved[note.id]?.key)
         assertEquals("e1", saved[note.id]?.etag)
+    }
+
+    @Test
+    fun secondSyncAfterPullDownloadsAndUploadsNothing() {
+        val notes = (1..5).map { Note.fromTitle(title = "Remote $it", body = "body $it") }
+        val bodies = notes.associate { "notes/${it.relativePath}" to NoteDocument.serialize(it) }
+        val listXml = "<?xml version=\"1.0\"?><ListBucketResult>" +
+            bodies.keys.joinToString("") { "<Contents><Key>$it</Key><ETag>\"h-${it.hashCode()}\"</ETag></Contents>" } +
+            "</ListBucketResult>"
+        val gets = java.util.concurrent.atomic.AtomicInteger()
+        val puts = java.util.concurrent.atomic.AtomicInteger()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                val path = java.net.URLDecoder.decode(request.path!!.removePrefix("/b/"), "UTF-8")
+                return when {
+                    request.method == "PUT" -> { puts.incrementAndGet(); MockResponse().setResponseCode(200) }
+                    request.path!!.contains("list-type=2") ->
+                        MockResponse().setResponseCode(200).setBody(if (request.path!!.contains("prefix=notes")) listXml else
+                            "<?xml version=\"1.0\"?><ListBucketResult></ListBucketResult>")
+                    else -> {
+                        gets.incrementAndGet()
+                        // GET reports the validator in weak form, as R2 does when it compresses.
+                        MockResponse().setResponseCode(200).setBody(bodies.getValue(path.substringBefore("?")))
+                            .addHeader("ETag", "W/\"h-${path.substringBefore("?").hashCode()}\"")
+                    }
+                }
+            }
+        }
+
+        val first = engine.sync()
+        assertEquals(5, first.appliedLocally)
+        assertEquals(5, gets.get())
+
+        // Reopen as the app does on relaunch, then sync again with nothing changed.
+        val reopened = NoteStore(directory, File(base, "tombstones.json"))
+        val second = SyncEngine(reopened, S3Client(config), stateFile).sync()
+        assertEquals(0, second.uploaded)
+        assertEquals(0, second.appliedLocally)
+        assertEquals(5, gets.get())
+        assertEquals(0, puts.get())
     }
 
     @Test

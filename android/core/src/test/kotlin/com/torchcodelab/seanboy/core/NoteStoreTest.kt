@@ -238,6 +238,18 @@ class NoteStoreTest {
     }
 
     @Test
+    fun applyRemoteKeepsTheNotesOwnModifiedTimeAcrossReload() {
+        val store = makeStore()
+        val old = Instant.parse("2020-03-04T05:06:07Z")
+        val remote = Note.fromTitle(title = "Pulled", body = "from the bucket").copy(createdAt = old, modifiedAt = old)
+        store.applyRemote(remote)
+
+        // A relaunch rescans the folder; the pull must not look like a local edit.
+        val reopened = makeStore()
+        assertEquals(old, reopened.note(remote.id)?.modifiedAt)
+    }
+
+    @Test
     fun applyRemoteMoveRelocatesFile() {
         val store = makeStore()
         val note = store.create(title = "Mobile", body = "v1")

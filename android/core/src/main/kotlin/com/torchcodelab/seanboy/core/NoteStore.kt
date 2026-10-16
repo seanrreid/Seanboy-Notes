@@ -161,7 +161,7 @@ class NoteStore(
             idByPath.remove(existing.relativePath.lowercase())
             fsModifiedByPath.remove(existing.relativePath)
         }
-        write(note)
+        write(note, mtime = note.modifiedAt)
     }
 
     // MARK: - Disk
@@ -277,11 +277,17 @@ class NoteStore(
     private fun relativePathOf(file: File): String =
         file.relativeToOrNull(directory)?.invariantSeparatorsPath ?: file.name
 
-    private fun write(note: Note) {
+    /**
+     * [mtime] pins the file's mtime to the note's own modified time. Remote
+     * applies need it: otherwise the write time (now) would outrank the
+     * frontmatter on the next [reload] and make every pulled note look edited.
+     */
+    private fun write(note: Note, mtime: Instant? = null) {
         val file = fileFor(note.relativePath)
         runCatching {
             file.parentFile?.mkdirs()
             file.writeText(NoteDocument.serialize(note))
+            if (mtime != null) file.setLastModified(mtime.toEpochMilli())
             _notesByID[note.id] = note
             idByPath[note.relativePath.lowercase()] = note.id
             fsModifiedByPath[note.relativePath] = Instant.ofEpochMilli(file.lastModified())

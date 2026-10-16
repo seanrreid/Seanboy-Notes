@@ -1,6 +1,8 @@
 package com.torchcodelab.seanboy.core
 
 import java.io.File
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -29,6 +31,11 @@ class SyncEngine(
         val unresolved: Int,
     )
 
+    private companion object {
+        const val DOWNLOAD_THREADS = 8
+        const val CHECKPOINT_EVERY = 50
+    }
+
     private val versionStamp: DateTimeFormatter =
         DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC)
 
@@ -43,14 +50,14 @@ class SyncEngine(
         // 2. Download anything this device hasn't seen. Objects that don't parse
         // as notes stay note-less and are left untouched.
         val needed = SyncPlanner.keysNeedingDownload(listing, syncState).toSet()
-        for (i in listing.indices) {
-            val key = listing[i].key
-            if (key !in needed) continue
-            val got = client.get(key)
+        val neededIndexes = listing.indices.filter { listing[it].key in needed }
+        val downloaded = downloadAll(neededIndexes.map { listing[it].key })
+        for ((n, i) in neededIndexes.withIndex()) {
+            val got = downloaded[n]
             val text = String(got.data, Charsets.UTF_8)
             listing[i] = listing[i].copy(
                 etag = got.etag,
-                note = NoteDocument.note(text, relativePath = SyncPlanner.relativePath(key) ?: ""),
+                note = NoteDocument.note(text, relativePath = SyncPlanner.relativePath(listing[i].key) ?: ""),
             )
         }
 
@@ -70,6 +77,7 @@ class SyncEngine(
 
         // 4. Apply remote changes locally, stashing any displaced local edit
         // into .versions/ so a lost conflict is never lost data.
+        var appliedSinceSave = 0
         for (apply in plan.applyLocally) {
             apply.displacedLocal?.let { displaced ->
                 val name = NoteNaming.sanitize(displaced.title)
@@ -79,6 +87,11 @@ class SyncEngine(
             }
             store.applyRemote(apply.note)
             syncState[apply.note.id] = SyncState.Entry(apply.key, apply.etag, apply.note.modifiedAt)
+            // Checkpoint so an interrupted first pull resumes instead of restarting.
+            if (++appliedSinceSave >= CHECKPOINT_EVERY) {
+                syncState.save(stateFile)
+                appliedSinceSave = 0
+            }
         }
 
         // 5. Deletions last, so an upload failure never orphans a note.
@@ -100,6 +113,28 @@ class SyncEngine(
 
         syncState.save(stateFile)
         return Result(uploaded, plan.applyLocally.size, plan.deleteRemoteKeys.size, unresolved)
+    }
+
+    /**
+     * Fetches [keys] over a small pool (a first pull is hundreds of tiny
+     * objects, so serial round-trips dominate). Results keep [keys] order; the
+     * first failure is rethrown.
+     */
+    private fun downloadAll(keys: List<String>): List<S3Get> {
+        if (keys.isEmpty()) return emptyList()
+        val pool = Executors.newFixedThreadPool(minOf(DOWNLOAD_THREADS, keys.size))
+        try {
+            val futures = keys.map { key -> pool.submit<S3Get> { client.get(key) } }
+            return futures.map { f ->
+                try {
+                    f.get()
+                } catch (e: ExecutionException) {
+                    throw e.cause ?: e
+                }
+            }
+        } finally {
+            pool.shutdownNow()
+        }
     }
 
     private fun performUpload(upload: SyncPlanner.Upload, syncState: SyncState) {

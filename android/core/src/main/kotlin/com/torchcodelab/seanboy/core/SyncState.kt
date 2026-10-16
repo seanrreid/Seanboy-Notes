@@ -56,7 +56,7 @@ data class SyncState(
             val dto = runCatching { json.decodeFromString(Dto.serializer(), text) }.getOrNull()
                 ?: return SyncState()
             val entries = dto.entries.mapValues { (_, e) ->
-                Entry(e.key, e.etag, NoteDocument.parseDate(e.modifiedAt) ?: Instant.EPOCH)
+                Entry(e.key, S3Client.normalizeETag(e.etag), NoteDocument.parseDate(e.modifiedAt) ?: Instant.EPOCH)
             }.toMutableMap()
             return SyncState(entries)
         }
