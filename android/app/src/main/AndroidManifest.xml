@@ -6,6 +6,7 @@
       INTERNET is the only permission — on-demand R2 sync over HTTPS.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:allowBackup="true"

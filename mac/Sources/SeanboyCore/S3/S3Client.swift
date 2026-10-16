@@ -184,8 +184,16 @@ public final class S3Client: Sendable {
     }
 
     private func etag(from response: HTTPURLResponse, key: String) -> String {
-        let raw = response.value(forHTTPHeaderField: "ETag") ?? ""
-        return raw.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        S3Client.normalizeETag(response.value(forHTTPHeaderField: "ETag") ?? "")
+    }
+
+    /// GET responses can carry a weak validator (`W/"abc"`, e.g. when the edge
+    /// compresses the body) while LIST reports the bare hash. Strip the weak
+    /// prefix and quotes so both forms compare equal.
+    static func normalizeETag(_ raw: String) -> String {
+        var value = raw.trimmingCharacters(in: .whitespaces)
+        if value.hasPrefix("W/") { value.removeFirst(2) }
+        return value.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
     }
 }
 
@@ -236,7 +244,7 @@ final class ListResultParser: NSObject, XMLParserDelegate {
         case "Key" where inContents:
             key = text
         case "ETag" where inContents:
-            etag = text.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            etag = S3Client.normalizeETag(text)
         case "Contents":
             inContents = false
             page.objects.append(S3Object(key: key, etag: etag))

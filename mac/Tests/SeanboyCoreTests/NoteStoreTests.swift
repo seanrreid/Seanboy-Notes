@@ -454,6 +454,20 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertTrue(store.tombstones.contains(id: note.id))
     }
 
+    func testApplyRemoteKeepsTheNotesOwnModifiedTimeAcrossReload() throws {
+        let store = try makeStore()
+        let old = Date(timeIntervalSince1970: 1_583_300_767)
+        var remote = Note(title: "Pulled", body: "from the bucket")
+        remote.createdAt = old
+        remote.modifiedAt = old
+        store.applyRemote(remote)
+
+        // A relaunch rescans the folder; the pull must not look like a local edit.
+        let reopened = try makeStore()
+        XCTAssertEqual(reopened.note(id: remote.id)?.modifiedAt.timeIntervalSince1970 ?? 0,
+                       old.timeIntervalSince1970, accuracy: 1)
+    }
+
     func testApplyRemoteMoveRelocatesFile() throws {
         let store = try makeStore()
         let note = store.create(title: "Mobile", body: "v1")

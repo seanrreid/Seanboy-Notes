@@ -36,7 +36,13 @@ public struct SyncState: Codable, Equatable, Sendable {
         guard let data = try? Data(contentsOf: url) else { return SyncState() }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode(SyncState.self, from: data)) ?? SyncState()
+        var state = (try? decoder.decode(SyncState.self, from: data)) ?? SyncState()
+        // Heal ETags saved in weak form (`W/"abc"`) by older builds.
+        for (id, entry) in state.entries {
+            let healed = S3Client.normalizeETag(entry.etag)
+            if healed != entry.etag { state.entries[id]?.etag = healed }
+        }
+        return state
     }
 
     public func save(to url: URL) throws {
